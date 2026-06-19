@@ -14,6 +14,11 @@ export default function Problem() {
   const [err, setErr] = useState("")
 
   useEffect(() => {
+    if (!statement) return
+    ;(window as any).MathJax?.typesetPromise?.()
+  }, [statement])
+
+  useEffect(() => {
     if (!slug) return
     api.problem(slug)
       .then(r => { setProblem(r.problem); setStatement(r.statement) })

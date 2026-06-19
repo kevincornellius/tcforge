@@ -5,6 +5,7 @@ import Problems from "./pages/Problems"
 import Problem from "./pages/Problem"
 import Submission from "./pages/Submission"
 import Scoreboard from "./pages/Scoreboard"
+import Admin from "./pages/Admin"
 
 function Nav() {
   const { user, logout } = useAuth()
@@ -23,6 +24,7 @@ function Nav() {
       <div className="nav-links">
         <Link to="/problems">Problems</Link>
         <Link to="/scoreboard">Scoreboard</Link>
+        {user.is_admin && <Link to="/admin">Admin</Link>}
       </div>
       <div className="nav-user">
         <span>{user.display_name}</span>
@@ -51,6 +53,7 @@ function AppRoutes() {
           <Route path="/problems/:slug" element={<RequireAuth><Problem /></RequireAuth>} />
           <Route path="/submissions/:id" element={<RequireAuth><Submission /></RequireAuth>} />
           <Route path="/scoreboard" element={<RequireAuth><Scoreboard /></RequireAuth>} />
+          <Route path="/admin" element={<RequireAuth><Admin /></RequireAuth>} />
           <Route path="*" element={<Navigate to="/problems" replace />} />
         </Routes>
       </main>

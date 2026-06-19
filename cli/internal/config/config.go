@@ -24,6 +24,7 @@ type Account struct {
 	Username    string `yaml:"username"`
 	Password    string `yaml:"password"`
 	DisplayName string `yaml:"display_name"`
+	IsAdmin     bool   `yaml:"is_admin"`
 }
 
 type Judge struct {

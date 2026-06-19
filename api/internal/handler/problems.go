@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/kevincornellius/tcforge/api/internal/db"
@@ -57,10 +59,52 @@ func GetProblem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	statement := readStatement(path)
+	statement := rewriteAssetPaths(readStatement(path), slug)
 	json.NewEncoder(w).Encode(map[string]any{
 		"problem":   p,
 		"statement": statement,
+	})
+}
+
+// ServeAsset serves static files (images, etc.) from a problem's directory.
+func ServeAsset(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "slug")
+
+	var problemPath string
+	err := db.DB.QueryRow("SELECT path FROM problems WHERE slug = ?", slug).Scan(&problemPath)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	// chi wildcard includes the leading slash
+	asset := chi.URLParam(r, "*")
+	// prevent path traversal
+	if strings.Contains(asset, "..") {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	http.ServeFile(w, r, filepath.Join(contestDir, problemPath, asset))
+}
+
+var reSrc = regexp.MustCompile(`(?i)(src|href)="([^"]*)"`)
+
+// rewriteAssetPaths rewrites relative src/href attributes to go through the
+// asset endpoint so images inside the problem directory are served correctly.
+func rewriteAssetPaths(html, slug string) string {
+	return reSrc.ReplaceAllStringFunc(html, func(m string) string {
+		parts := reSrc.FindStringSubmatch(m)
+		if len(parts) < 3 {
+			return m
+		}
+		attr, val := parts[1], parts[2]
+		// leave absolute URLs and data URIs untouched
+		if strings.HasPrefix(val, "http") || strings.HasPrefix(val, "/") ||
+			strings.HasPrefix(val, "data:") || strings.HasPrefix(val, "#") {
+			return m
+		}
+		return attr + `="/api/problems/` + slug + `/assets/` + val + `"`
 	})
 }
 

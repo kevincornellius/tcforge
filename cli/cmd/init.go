@@ -45,7 +45,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		},
 		Problems: problems,
 		Accounts: []config.Account{
-			{Username: "admin", Password: "admin", DisplayName: "Admin"},
+			{Username: "admin", Password: "admin", DisplayName: "Admin", IsAdmin: true},
 		},
 		Judge: config.Judge{
 			Languages: []string{"cpp17", "python3"},

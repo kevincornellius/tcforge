@@ -59,6 +59,21 @@ func main() {
 		r.Get("/api/scoreboard", handler.GetScoreboard)
 	})
 
+	// Public asset serving (images referenced in problem statements)
+	r.Get("/api/problems/{slug}/assets/*", handler.ServeAsset)
+
+	// Admin routes (auth + admin required)
+	r.Group(func(r chi.Router) {
+		r.Use(handler.RequireAuth)
+		r.Use(handler.RequireAdmin)
+		r.Use(jsonMW)
+
+		r.Get("/api/admin/users", handler.ListUsers)
+		r.Post("/api/admin/users", handler.CreateUser)
+		r.Delete("/api/admin/users/{id}", handler.DeleteUser)
+		r.Put("/api/admin/users/{id}/password", handler.ResetPassword)
+	})
+
 	// Serve pre-built React frontend (SPA fallback to index.html)
 	distDir := "/app/web/dist"
 	r.Handle("/*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

@@ -45,6 +45,15 @@ export const api = {
     req<{ submission: Submission; verdicts: Verdict[] }>("GET", `/submissions/${id}`),
 
   scoreboard: () => req<ScoreboardEntry[]>("GET", "/scoreboard"),
+
+  admin: {
+    users: () => req<AdminUser[]>("GET", "/admin/users"),
+    createUser: (username: string, password: string, display_name: string, is_admin: boolean) =>
+      req<{ id: number }>("POST", "/admin/users", { username, password, display_name, is_admin }),
+    deleteUser: (id: number) => req("DELETE", `/admin/users/${id}`),
+    resetPassword: (id: number, password: string) =>
+      req("PUT", `/admin/users/${id}/password`, { password }),
+  },
 }
 
 export interface Problem {
@@ -73,6 +82,13 @@ export interface Verdict {
   verdict: string
   time_ms: number
   memory_kb: number
+}
+
+export interface AdminUser {
+  id: number
+  username: string
+  display_name: string
+  is_admin: boolean
 }
 
 export interface ScoreboardEntry {

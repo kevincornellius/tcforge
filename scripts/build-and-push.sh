@@ -8,6 +8,13 @@ ROOT="$SCRIPT_DIR/.."
 
 cd "$ROOT"
 
+echo "==> Syncing Go workspace"
+go work sync
+go -C cli mod tidy
+go -C api mod tidy
+go -C judge mod tidy
+
+echo ""
 echo "==> Building CLI binary"
 go build -C cli -o ../tcforge .
 echo "    tcforge binary written to $(pwd)/tcforge"
