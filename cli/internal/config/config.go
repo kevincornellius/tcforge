@@ -16,8 +16,8 @@ type Problem struct {
 	Path        string `yaml:"path"`
 	ID          string `yaml:"id"`
 	Title       string `yaml:"title"`
-	TimeLimit   int    `yaml:"time_limit,omitempty"`   // seconds, default 1
-	MemoryLimit int    `yaml:"memory_limit,omitempty"` // MB, default 256
+	TimeLimit   int    `yaml:"time_limit"`   // seconds
+	MemoryLimit int    `yaml:"memory_limit"` // MB
 }
 
 type Account struct {

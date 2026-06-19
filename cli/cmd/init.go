@@ -94,9 +94,11 @@ func detectProblems(dir string) ([]config.Problem, error) {
 			continue
 		}
 		problems = append(problems, config.Problem{
-			Path:  name,
-			ID:    name,
-			Title: name,
+			Path:        name,
+			ID:          name,
+			Title:       name,
+			TimeLimit:   1,
+			MemoryLimit: 256,
 		})
 	}
 	return problems, nil
