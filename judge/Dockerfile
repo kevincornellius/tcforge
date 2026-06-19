@@ -18,13 +18,14 @@ RUN apt-get update && apt-get install -y \
     python3 \
     libcap-dev \
     libseccomp-dev \
+    libsystemd-dev \
     git \
     make \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # Build isolate from source (IOI sandbox)
-RUN git clone https://github.com/ioi/isolate.git /isolate && \
+RUN git clone --depth=1 https://github.com/ioi/isolate.git /isolate && \
     cd /isolate && \
     make install && \
     rm -rf /isolate
