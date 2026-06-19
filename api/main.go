@@ -26,23 +26,25 @@ func main() {
 
 	handler.SetContestDir(contestDir)
 
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(func(next http.Handler) http.Handler {
+	jsonMW := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			next.ServeHTTP(w, r)
 		})
-	})
+	}
+
+	r := chi.NewRouter()
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
 
 	// Public
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"ok":true}`)) })
-	r.Post("/api/auth/login", handler.Login)
+	r.With(jsonMW).Get("/health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"ok":true}`)) })
+	r.With(jsonMW).Post("/api/auth/login", handler.Login)
 
 	// Authenticated
 	r.Group(func(r chi.Router) {
 		r.Use(handler.RequireAuth)
+		r.Use(jsonMW)
 
 		r.Post("/api/auth/logout", handler.Logout)
 		r.Get("/api/auth/me", handler.Me)
@@ -57,9 +59,16 @@ func main() {
 		r.Get("/api/scoreboard", handler.GetScoreboard)
 	})
 
-	// Serve pre-built React frontend
-	fs := http.FileServer(http.Dir("/app/web/dist"))
-	r.Handle("/*", fs)
+	// Serve pre-built React frontend (SPA fallback to index.html)
+	distDir := "/app/web/dist"
+	r.Handle("/*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		path := distDir + req.URL.Path
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			http.ServeFile(w, req, distDir+"/index.html")
+			return
+		}
+		http.FileServer(http.Dir(distDir)).ServeHTTP(w, req)
+	}))
 
 	log.Println("api listening on :8080")
 	log.Fatal(http.ListenAndServe(":8080", r))
