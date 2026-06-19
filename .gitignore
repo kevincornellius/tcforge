@@ -5,6 +5,7 @@
 # Go
 */go.sum
 dist/
+tcforge
 
 # Node
 web/node_modules/
