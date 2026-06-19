@@ -1,0 +1,48 @@
+version: 2
+
+project_name: tcforge
+
+before:
+  hooks:
+    - go work sync
+
+builds:
+  - id: tcforge
+    main: ./cli
+    binary: tcforge
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: tcforge
+    builds: [tcforge]
+    name_template: "tcforge-{{ .Os }}-{{ .Arch }}"
+    format: binary
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+brews:
+  - repository:
+      owner: kevincornellius
+      name: homebrew-tap
+    name: tcforge
+    homepage: "https://github.com/kevincornellius/tcforge"
+    description: "Local contest hosting powered by tcframe"
+    install: bin.install "tcforge"

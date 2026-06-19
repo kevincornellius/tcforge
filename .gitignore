@@ -1,0 +1,14 @@
+# tcforge runtime
+.tcforge/
+**/tc/
+
+# Go
+*/go.sum
+dist/
+
+# Node
+web/node_modules/
+web/dist/
+
+# OS
+.DS_Store
