@@ -2,16 +2,13 @@ FROM ubuntu:22.04
 
 RUN apt-get update && apt-get install -y \
     g++ \
-    cmake \
-    make \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Build tcframe from source
-RUN git clone https://github.com/ia-toki/tcframe.git /tcframe && \
-    cd /tcframe && \
-    cmake . && \
-    make install
+# tcframe is header-only — just clone and point TCFRAME_HOME at it
+RUN git clone --depth=1 https://github.com/ia-toki/tcframe.git /tcframe
+ENV TCFRAME_HOME=/tcframe
+RUN ln -s /tcframe/scripts/tcframe /usr/local/bin/tcframe
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
