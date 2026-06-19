@@ -190,7 +190,8 @@ func runCase(lang, binPath, inFile, outFile string, timeLimitSec int) (verdict s
 	var cmd *exec.Cmd
 	switch lang {
 	case "cpp17":
-		cmd = exec.CommandContext(ctx, binPath)
+		// unlimited stack for recursive solutions
+		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", "ulimit -s unlimited && "+binPath)
 	case "python3":
 		cmd = exec.CommandContext(ctx, "python3", binPath)
 	default:
