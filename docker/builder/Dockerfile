@@ -11,6 +11,11 @@ RUN git clone --depth=1 https://github.com/ia-toki/tcframe.git /tcframe
 ENV TCFRAME_HOME=/tcframe
 RUN ln -s /tcframe/scripts/tcframe /usr/local/bin/tcframe
 
+# tcrand is header-only — install headers so #include <tcrand/...> works
+RUN git clone --depth=1 https://github.com/afaji/tcrand.git /tcrand \
+    && cp -r /tcrand/include/tcrand /usr/local/include/tcrand \
+    && rm -rf /tcrand
+
 COPY entrypoint.sh /entrypoint.sh
 COPY parse_spec.py /parse_spec.py
 RUN chmod +x /entrypoint.sh

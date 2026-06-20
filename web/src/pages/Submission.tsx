@@ -2,6 +2,11 @@ import { useEffect, useState } from "react"
 import { useParams } from "react-router-dom"
 import { api, Submission as Sub, Verdict, SubtaskScore } from "../api"
 
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return "—"
+  return new Date(iso).toLocaleString()
+}
+
 interface SubtaskConfig {
   test_groups: number[][]  // [i] = subtask IDs group i+1 belongs to
   points: number[]         // [j] = points for subtask j+1
@@ -100,6 +105,10 @@ export default function Submission() {
         </span>
         &nbsp;·&nbsp; <strong>{sub.score} pts</strong>
         {sub.time_ms > 0 && <> &nbsp;·&nbsp; {sub.time_ms}ms</>}
+      </p>
+      <p className="sub-dates">
+        Submitted: {fmtDate(sub.submitted_at)}
+        {sub.graded_at && <> &nbsp;·&nbsp; Graded: {fmtDate(sub.graded_at)}</>}
       </p>
 
       {pending && (

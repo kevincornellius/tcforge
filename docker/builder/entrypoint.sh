@@ -8,6 +8,20 @@ cd "$PROBLEM_DIR"
 echo "[builder] Compiling solution.cpp..."
 g++ -O2 -std=c++20 -o solution solution.cpp
 
+# Compile scorer/communicator before running the tcframe runner — it calls the
+# scorer during test case generation to validate sample outputs.
+if [ -f scorer.cpp ]; then
+    echo "[builder] Compiling scorer.cpp..."
+    g++ -O2 -std=c++20 -o scorer scorer.cpp
+    echo "[builder] scorer compiled."
+fi
+
+if [ -f communicator.cpp ]; then
+    echo "[builder] Compiling communicator.cpp..."
+    g++ -O2 -std=c++20 -o communicator communicator.cpp
+    echo "[builder] communicator compiled."
+fi
+
 echo "[builder] Building tcframe runner from spec.cpp..."
 tcframe build
 
@@ -15,20 +29,6 @@ echo "[builder] Generating test cases..."
 ./runner --solution=./solution
 
 echo "[builder] Done. Test cases written to tc/"
-
-# Compile scorer.cpp if present (custom output checker for batch problems).
-if [ -f scorer.cpp ]; then
-    echo "[builder] Compiling scorer.cpp..."
-    g++ -O2 -std=c++20 -o scorer scorer.cpp
-    echo "[builder] scorer compiled."
-fi
-
-# Compile communicator.cpp if present (judge program for interactive problems).
-if [ -f communicator.cpp ]; then
-    echo "[builder] Compiling communicator.cpp..."
-    g++ -O2 -std=c++20 -o communicator communicator.cpp
-    echo "[builder] communicator compiled."
-fi
 
 # Generate config.json from spec.cpp if not already present.
 # This gives the judge the subtask→group structure for IOI scoring.

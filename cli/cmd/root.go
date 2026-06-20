@@ -12,7 +12,8 @@ var rootCmd = &cobra.Command{
 	Short: "Local contest hosting powered by tcframe",
 }
 
-func Execute() {
+func Execute(version string) {
+	rootCmd.Version = version
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

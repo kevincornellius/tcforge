@@ -23,6 +23,8 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 }
 
 export const api = {
+  version: () => fetch("/api/version").then(r => r.json() as Promise<{ version: string }>),
+
   login: (username: string, password: string) =>
     req<{ token: string; username: string; display_name: string; is_admin: boolean }>(
       "POST", "/auth/login", { username, password }
@@ -70,7 +72,7 @@ export const api = {
     // Contest settings
     updateContest: (data: { name: string; duration: string; scoring: string; always_open: boolean; allow_submission: boolean }) =>
       req("PUT", "/admin/contest", data),
-    startContest: (startAt?: string) => req("POST", "/admin/contest/start", startAt ? { start_at: startAt } : {}),
+    startContest: (startAt?: string) => req("POST", "/admin/contest/start", startAt ? { start_at: new Date(startAt).toISOString() } : {}),
     stopContest: () => req("POST", "/admin/contest/stop"),
     resetContest: () => req("POST", "/admin/contest/reset"),
 
@@ -86,6 +88,30 @@ export const api = {
     // Problems
     updateProblem: (id: number, data: { title: string; time_limit: number; memory_limit: number }) =>
       req("PUT", `/admin/problems/${id}`, data),
+    rebuild: async (id: number, onLine: (line: string) => void): Promise<void> => {
+      const res = await fetch(`/api/admin/problems/${id}/rebuild`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token()}` },
+      })
+      if (!res.ok || !res.body) throw new Error(await res.text())
+      const reader = res.body.getReader()
+      const dec = new TextDecoder()
+      let buf = ""
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += dec.decode(value, { stream: true })
+        const lines = buf.split("\n")
+        buf = lines.pop()!
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue
+          const data = line.slice(6)
+          if (data === "DONE:ok") return
+          if (data === "DONE:error") throw new Error("Build failed — see log above")
+          onLine(data)
+        }
+      }
+    },
     uploadStatement: (problemId: number, language: string, file: File): Promise<void> => {
       const form = new FormData()
       form.append("language", language)
@@ -139,6 +165,7 @@ export interface Submission {
   score: number
   time_ms: number
   submitted_at: string
+  graded_at: string | null
 }
 
 export interface Verdict {
@@ -173,6 +200,7 @@ export interface AdminSubmission {
   verdict: string
   score: number
   submitted_at: string
+  graded_at: string | null
 }
 
 export interface Announcement {

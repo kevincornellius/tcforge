@@ -121,6 +121,7 @@ func migrate() error {
 		return err
 	}
 	// Migrate existing DBs — ignore errors if columns/tables already exist
+	DB.Exec("ALTER TABLE submissions ADD COLUMN graded_at DATETIME")
 	DB.Exec("ALTER TABLE verdicts ADD COLUMN group_num INTEGER NOT NULL DEFAULT 0")
 	DB.Exec("ALTER TABLE verdicts ADD COLUMN points_fraction REAL NOT NULL DEFAULT 1.0")
 	DB.Exec(`CREATE TABLE IF NOT EXISTS subtask_scores (

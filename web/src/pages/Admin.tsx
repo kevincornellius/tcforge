@@ -1,14 +1,27 @@
 import { useEffect, useState, useRef, FormEvent } from "react"
 import { api, AdminUser, AdminSubmission, Announcement, ContestState, Problem, StatementMeta } from "../api"
 
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return "—"
+  return new Date(iso).toLocaleString()
+}
+
 type Tab = "users" | "contest" | "problems" | "announcements" | "submissions"
 
 export default function Admin() {
   const [tab, setTab] = useState<Tab>("contest")
+  const [version, setVersion] = useState("")
+
+  useEffect(() => {
+    api.version().then(v => setVersion(v.version)).catch(() => {})
+  }, [])
 
   return (
     <div className="page admin-page">
-      <h2>Admin</h2>
+      <div className="admin-header">
+        <h2>Admin</h2>
+        {version && <span className="version-badge">tcforge:{version}</span>}
+      </div>
       <div className="admin-tabs">
         {(["contest", "users", "problems", "announcements", "submissions"] as Tab[]).map(t => (
           <button key={t} className={`admin-tab${tab === t ? " active" : ""}`} onClick={() => setTab(t)}>
@@ -270,6 +283,9 @@ function ProblemEditor({ problem, open, onToggle, onSaved }: {
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState("")
   const fileRef = useRef<HTMLInputElement>(null)
+  const [rebuildLog, setRebuildLog] = useState<string[]>([])
+  const [rebuildStatus, setRebuildStatus] = useState<"idle" | "building" | "ok" | "error">("idle")
+  const logRef = useRef<HTMLPreElement>(null)
 
   useEffect(() => {
     if (!open) return
@@ -313,6 +329,24 @@ function ProblemEditor({ problem, open, onToggle, onSaved }: {
   async function onDeleteStmt(stmtId: number) {
     await api.admin.deleteStatement(problem.id, stmtId).catch(e => setErr(e.message))
     loadStatements()
+  }
+
+  async function onRebuild() {
+    setRebuildStatus("building")
+    setRebuildLog([])
+    try {
+      await api.admin.rebuild(problem.id, line => {
+        setRebuildLog(prev => {
+          const next = [...prev, line]
+          setTimeout(() => { logRef.current?.scrollTo(0, logRef.current.scrollHeight) }, 0)
+          return next
+        })
+      })
+      setRebuildStatus("ok")
+    } catch (e: unknown) {
+      setRebuildLog(prev => [...prev, e instanceof Error ? e.message : "Unknown error"])
+      setRebuildStatus("error")
+    }
   }
 
   return (
@@ -381,6 +415,23 @@ function ProblemEditor({ problem, open, onToggle, onSaved }: {
               <button type="submit" disabled={uploading || !file}>{uploading ? "Uploading…" : "Upload"}</button>
             </form>
             <p className="field-hint">Accepted formats: HTML, Markdown, PDF, TeX</p>
+          </div>
+
+          <div className="rebuild-section">
+            <h4>Test Cases</h4>
+            <p className="field-hint">Re-runs the builder container: recompiles spec.cpp, regenerates tc/, and regenerates config.json (subtask assignments).</p>
+            <button
+              className={`btn-rebuild ${rebuildStatus}`}
+              onClick={onRebuild}
+              disabled={rebuildStatus === "building"}
+            >
+              {rebuildStatus === "building" ? "Building…" : "Rebuild Test Cases"}
+            </button>
+            {rebuildLog.length > 0 && (
+              <pre ref={logRef} className={`rebuild-log rebuild-log-${rebuildStatus}`}>
+                {rebuildLog.join("\n")}
+              </pre>
+            )}
           </div>
         </div>
       )}
@@ -462,7 +513,7 @@ function SubmissionsTab() {
       {err && <p className="error">{err}</p>}
       <table className="table">
         <thead>
-          <tr><th>#</th><th>User</th><th>Problem</th><th>Lang</th><th>Status</th><th>Verdict</th><th>Score</th><th></th></tr>
+          <tr><th>#</th><th>User</th><th>Problem</th><th>Lang</th><th>Verdict</th><th>Score</th><th>Submitted</th><th>Graded</th><th></th></tr>
         </thead>
         <tbody>
           {subs.map(s => (
@@ -471,9 +522,10 @@ function SubmissionsTab() {
               <td>{s.username}</td>
               <td>{s.problem_slug}</td>
               <td>{s.language}</td>
-              <td>{s.status}</td>
               <td className={`verdict verdict-${s.verdict}`}>{s.verdict || s.status}</td>
               <td>{s.score}</td>
+              <td className="date-cell">{fmtDate(s.submitted_at)}</td>
+              <td className="date-cell">{fmtDate(s.graded_at)}</td>
               <td>
                 <button
                   className="btn-ghost"

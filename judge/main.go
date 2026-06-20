@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -101,7 +102,14 @@ type submission struct {
 	MemoryLimit int
 }
 
-func processNext(db *sql.DB, contestDir string) error {
+func processNext(db *sql.DB, contestDir string) (retErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC in processNext: %v", r)
+			retErr = fmt.Errorf("panic: %v", r)
+		}
+	}()
+
 	var sub submission
 	err := db.QueryRow(`
 		SELECT s.id, p.path, s.language, s.code, p.time_limit, p.memory_limit
@@ -124,7 +132,7 @@ func processNext(db *sql.DB, contestDir string) error {
 	scoring := contestScoring(contestDir)
 	finalVerdict, score, maxTimeMs, subtaskResults := judge(db, sub, contestDir, scoring)
 
-	db.Exec("UPDATE submissions SET status='done', verdict=?, score=?, time_ms=? WHERE id=?",
+	db.Exec("UPDATE submissions SET status='done', verdict=?, score=?, time_ms=?, graded_at=CURRENT_TIMESTAMP WHERE id=?",
 		finalVerdict, score, maxTimeMs, sub.ID)
 
 	for _, s := range subtaskResults {
@@ -334,14 +342,14 @@ func judge(db *sql.DB, sub submission, contestDir, scoring string) (
 		var tMs int
 
 		if isInteractive {
-			ts, tMs = runCaseInteractive(sub.Language, binPath, inFile, communicatorPath, tmpDir, sub.TimeLimit)
+			ts, tMs = runCaseInteractive(sub.Language, binPath, inFile, communicatorPath, tmpDir, sub.TimeLimit, sub.MemoryLimit)
 		} else {
 			outFile := strings.TrimSuffix(inFile, ".in") + ".out"
 			checkerArg := ""
 			if hasCustomScorer {
 				checkerArg = scorerPath
 			}
-			ts, tMs = runCase(sub.Language, binPath, inFile, outFile, checkerArg, tmpDir, sub.TimeLimit)
+			ts, tMs = runCase(sub.Language, binPath, inFile, outFile, checkerArg, tmpDir, sub.TimeLimit, sub.MemoryLimit)
 		}
 
 		if tMs > maxTimeMs {
@@ -383,6 +391,21 @@ func judge(db *sql.DB, sub submission, contestDir, scoring string) (
 	return scoreIOIGroupEqual(groupScores, maxTimeMs)
 }
 
+// worstNonACVerdict returns the most notable failing verdict among a set of TCs:
+// TLE > RTE > WA, so callers can distinguish why a subtask scored zero.
+func worstNonACVerdict(tcs []tcScore) string {
+	worst := "WA"
+	for _, tc := range tcs {
+		switch tc.verdict {
+		case "TLE":
+			return "TLE"
+		case "RTE":
+			worst = "RTE"
+		}
+	}
+	return worst
+}
+
 // scoreIOIWithConfig uses tcframe's MinAggregator semantics:
 // subtask score = min(effectivePts(tc, subtaskMax)) across all TCs in the subtask.
 //
@@ -395,6 +418,7 @@ func scoreIOIWithConfig(
 		maxPts := float64(cfg.Points[s-1])
 		subtaskScore := maxPts // start at maximum; each TC can only lower this
 		hasTCs := false
+		var subtaskTCs []tcScore
 
 		for gIdx, subtasks := range cfg.TestGroups {
 			groupNum := gIdx + 1
@@ -404,6 +428,7 @@ func scoreIOIWithConfig(
 				}
 				for _, tc := range groupScores[groupNum] {
 					hasTCs = true
+					subtaskTCs = append(subtaskTCs, tc)
 					eff := tc.effectivePts(maxPts)
 					if eff < subtaskScore {
 						subtaskScore = eff
@@ -417,9 +442,11 @@ func scoreIOIWithConfig(
 		}
 
 		pts := int(math.Round(subtaskScore))
-		verdict := "WA"
+		verdict := worstNonACVerdict(subtaskTCs)
 		if pts >= cfg.Points[s-1] {
 			verdict = "AC"
+		} else if pts > 0 {
+			verdict = "OK"
 		}
 		score += pts
 		subtaskResults = append(subtaskResults, subtaskScoreResult{
@@ -428,9 +455,17 @@ func scoreIOIWithConfig(
 	}
 	finalVerdict = "AC"
 	for _, sr := range subtaskResults {
-		if sr.verdict != "AC" {
-			finalVerdict = "WA"
-			break
+		switch sr.verdict {
+		case "TLE":
+			finalVerdict = "TLE"
+		case "RTE":
+			if finalVerdict != "TLE" {
+				finalVerdict = "RTE"
+			}
+		case "WA", "OK":
+			if finalVerdict == "AC" {
+				finalVerdict = "WA"
+			}
 		}
 	}
 	return
@@ -468,13 +503,24 @@ func scoreIOIGroupEqual(
 		if i == len(groups)-1 {
 			maxPts = 100 - pointsPerGroup*(len(groups)-1)
 		}
-		pts := sumGroupScore(groupScores[g], float64(maxPts))
+		tcs := groupScores[g]
+		pts := sumGroupScore(tcs, float64(maxPts))
 		earned := int(math.Round(pts))
-		verdict := "WA"
+		verdict := worstNonACVerdict(tcs)
 		if earned >= maxPts {
 			verdict = "AC"
-		} else {
-			finalVerdict = "WA"
+		} else if earned > 0 {
+			verdict = "OK"
+		}
+		if verdict != "AC" {
+			switch {
+			case verdict == "TLE" || finalVerdict == "TLE":
+				finalVerdict = "TLE"
+			case verdict == "RTE" || finalVerdict == "RTE":
+				finalVerdict = "RTE"
+			default:
+				finalVerdict = "WA"
+			}
 		}
 		score += earned
 		subtaskResults = append(subtaskResults, subtaskScoreResult{
@@ -537,38 +583,74 @@ func compile(lang, code, dir string) (string, error) {
 	}
 }
 
-func runCase(lang, binPath, inFile, outFile, scorerPath, workDir string, timeLimitSec int) (ts tcScore, timeMs int) {
+func runCase(lang, binPath, inFile, outFile, scorerPath, workDir string, timeLimitSec, memLimitMB int) (ts tcScore, timeMs int) {
 	input, err := os.ReadFile(inFile)
 	if err != nil {
 		return tcScore{verdict: "IE"}, 0
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(),
-		time.Duration(timeLimitSec)*time.Second+500*time.Millisecond)
-	defer cancel()
-
+	// ulimit limits (all in KB):
+	//   -s 65536   : 64 MB stack — enough for deep recursion; prevents infinite-recursion from eating all RAM
+	//   -v <mem>   : virtual memory = problem limit + 256 MB overhead for runtime/stdlib
+	//   -f 131072  : 64 MB file writes — SIGXFSZ on overflow → RTE
+	vmKB := (memLimitMB + 256) * 1024
+	ulimitPrefix := fmt.Sprintf("ulimit -s 65536 && ulimit -v %d && ulimit -f 131072 && ", vmKB)
 	var cmd *exec.Cmd
 	switch lang {
 	case "cpp17", "cpp20":
-		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", "ulimit -s unlimited && "+binPath)
+		cmd = exec.Command("/bin/sh", "-c", ulimitPrefix+binPath)
 	case "python3":
-		cmd = exec.CommandContext(ctx, "python3", binPath)
+		cmd = exec.Command("/bin/sh", "-c", ulimitPrefix+"python3 "+binPath)
 	default:
 		return tcScore{verdict: "IE"}, 0
 	}
 
-	var stdout bytes.Buffer
+	// Setpgid puts the shell (and all children) in their own process group.
+	// On timeout we kill -pgid to guarantee no orphan processes survive.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	var buf bytes.Buffer
 	cmd.Stdin = bytes.NewReader(input)
-	cmd.Stdout = &stdout
+	cmd.Stdout = &limitWriter{w: &buf, rem: 64 * 1024 * 1024} // 64 MB cap
 
 	start := time.Now()
-	err = cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return tcScore{verdict: "IE"}, 0
+	}
+
+	deadline := time.Duration(timeLimitSec)*time.Second + 500*time.Millisecond
+	timer := time.NewTimer(deadline)
+	defer timer.Stop()
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	var runErr error
+	timedOut := false
+	select {
+	case runErr = <-done:
+	case <-timer.C:
+		timedOut = true
+		// Kill the entire process group — catches orphaned children from shell forks.
+		if cmd.Process != nil {
+			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			cmd.Process.Kill() // fallback: direct kill in case pgid kill fails
+		}
+		// Hard deadline on the drain: if the process somehow doesn't die in 5s,
+		// move on anyway so the judge doesn't block forever.
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			log.Printf("warning: process did not exit after SIGKILL within 5s")
+		}
+	}
+
 	elapsed := int(time.Since(start).Milliseconds())
 
-	if ctx.Err() == context.DeadlineExceeded {
+	if timedOut {
 		return tcScore{verdict: "TLE"}, elapsed
 	}
-	if err != nil {
+	if runErr != nil {
 		return tcScore{verdict: "RTE"}, elapsed
 	}
 
@@ -578,7 +660,7 @@ func runCase(lang, binPath, inFile, outFile, scorerPath, workDir string, timeLim
 		if err != nil {
 			return tcScore{verdict: "IE"}, elapsed
 		}
-		if normalize(stdout.String()) == normalize(string(expected)) {
+		if normalize(buf.String()) == normalize(string(expected)) {
 			return tcScore{verdict: "AC"}, elapsed
 		}
 		return tcScore{verdict: "WA"}, elapsed
@@ -588,7 +670,7 @@ func runCase(lang, binPath, inFile, outFile, scorerPath, workDir string, timeLim
 	// Protocol: ./scorer <input> <expected_output> <contestant_output>
 	// Scorer writes verdict to stdout (tcframe two-line format).
 	contestantOut := filepath.Join(workDir, "contestant.out")
-	if err := os.WriteFile(contestantOut, stdout.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(contestantOut, buf.Bytes(), 0644); err != nil {
 		return tcScore{verdict: "IE"}, elapsed
 	}
 
@@ -610,16 +692,17 @@ func runCase(lang, binPath, inFile, outFile, scorerPath, workDir string, timeLim
 //	./communicator <input> < pipe | ./solution > pipe
 //
 // The communicator writes its verdict to stderr (tcframe two-line format).
-func runCaseInteractive(lang, binPath, inFile, communicatorPath, workDir string, timeLimitSec int) (ts tcScore, timeMs int) {
+func runCaseInteractive(lang, binPath, inFile, communicatorPath, workDir string, timeLimitSec, memLimitMB int) (ts tcScore, timeMs int) {
 	pipePath := filepath.Join(workDir, "comm.pipe")
 	commErrPath := filepath.Join(workDir, "comm.stderr")
 
+	vmKB := (memLimitMB + 256) * 1024
 	var innerCmd string
 	switch lang {
 	case "cpp17", "cpp20":
-		innerCmd = fmt.Sprintf(`ulimit -s unlimited && "%s"`, binPath)
+		innerCmd = fmt.Sprintf(`ulimit -s 65536 && ulimit -v %d && "%s"`, vmKB, binPath)
 	case "python3":
-		innerCmd = fmt.Sprintf(`python3 "%s"`, binPath)
+		innerCmd = fmt.Sprintf(`ulimit -v %d && python3 "%s"`, vmKB, binPath)
 	default:
 		return tcScore{verdict: "IE"}, 0
 	}
@@ -642,16 +725,40 @@ exit $EXIT
 		return tcScore{verdict: "IE"}, 0
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(),
-		time.Duration(timeLimitSec)*time.Second+500*time.Millisecond)
-	defer cancel()
+	cmd := exec.Command("/bin/sh", scriptPath)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	cmd := exec.CommandContext(ctx, "/bin/sh", scriptPath)
+	deadline := time.Duration(timeLimitSec)*time.Second + 500*time.Millisecond
+	timer := time.NewTimer(deadline)
+	defer timer.Stop()
+
 	start := time.Now()
-	cmd.Run() // exit code unreliable for pipe setups; use communicator stderr
+	if err := cmd.Start(); err != nil {
+		return tcScore{verdict: "IE"}, 0
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	timedOut := false
+	select {
+	case <-done:
+	case <-timer.C:
+		timedOut = true
+		if cmd.Process != nil {
+			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			cmd.Process.Kill()
+		}
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			log.Printf("warning: interactive process did not exit after SIGKILL within 5s")
+		}
+	}
+
 	elapsed := int(time.Since(start).Milliseconds())
 
-	if ctx.Err() == context.DeadlineExceeded {
+	if timedOut {
 		return tcScore{verdict: "TLE"}, elapsed
 	}
 
@@ -661,6 +768,26 @@ exit $EXIT
 	}
 
 	return parseCheckerVerdict(string(commErrContent)), elapsed
+}
+
+// limitWriter caps how many bytes are written to the underlying writer.
+// Excess bytes are silently dropped — the buffer stays bounded even if
+// a solution prints gigabytes before crashing (RTE/TLE).
+type limitWriter struct {
+	w   *bytes.Buffer
+	rem int64
+}
+
+func (lw *limitWriter) Write(p []byte) (int, error) {
+	if lw.rem <= 0 {
+		return len(p), nil
+	}
+	if int64(len(p)) > lw.rem {
+		p = p[:lw.rem]
+	}
+	n, err := lw.w.Write(p)
+	lw.rem -= int64(n)
+	return n, err
 }
 
 func normalize(s string) string {

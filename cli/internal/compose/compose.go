@@ -30,9 +30,17 @@ func Generate(contestDir, tag string) (string, error) {
       - "6174:8080"
     volumes:
       - %s:/contest
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - TCFORGE_CONTEST_DIR=/contest
+      - TCFORGE_HOST_CONTEST_DIR=%s
+      - TCFORGE_VERSION=%s
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   judge:
     image: %s
@@ -44,7 +52,12 @@ func Generate(contestDir, tag string) (string, error) {
     restart: unless-stopped
     depends_on:
       - api
-`, apiImage, contestDir, judgeImage, contestDir)
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+`, apiImage, contestDir, contestDir, tag, judgeImage, contestDir)
 
 	if err := os.WriteFile(composePath, []byte(content), 0644); err != nil {
 		return "", err
@@ -53,8 +66,9 @@ func Generate(contestDir, tag string) (string, error) {
 }
 
 // Up runs docker compose up -d for the given compose file.
+// Uses --pull missing so locally built images (e.g. from dev.sh) take priority over the registry.
 func Up(composePath string) error {
-	cmd := exec.Command("docker", "compose", "-f", composePath, "up", "-d", "--pull", "always")
+	cmd := exec.Command("docker", "compose", "-f", composePath, "up", "-d", "--pull", "missing")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

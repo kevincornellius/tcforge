@@ -1,8 +1,14 @@
 package handler
 
 import (
+	"bufio"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -112,4 +118,95 @@ func ResetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	db.DB.Exec("UPDATE users SET password_hash=? WHERE id=?", string(hash), id)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// RebuildProblem streams the builder Docker container output via SSE.
+// It deletes config.json first so subtask assignments always regenerate from spec.cpp.
+func RebuildProblem(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	var problemPath string
+	if err := db.DB.QueryRow("SELECT path FROM problems WHERE id=?", id).Scan(&problemPath); err != nil {
+		http.Error(w, "problem not found", http.StatusNotFound)
+		return
+	}
+
+	// Host path is needed for the Docker volume mount — the daemon sees host paths.
+	hostContestDir := os.Getenv("TCFORGE_HOST_CONTEST_DIR")
+	if hostContestDir == "" {
+		hostContestDir = contestDir
+	}
+
+	tag := os.Getenv("TCFORGE_VERSION")
+	if tag == "" {
+		tag = "latest"
+	}
+
+	// Stream output line-by-line via SSE.
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flush, canFlush := w.(http.Flusher)
+
+	send := func(line string) {
+		fmt.Fprintf(w, "data: %s\n\n", line)
+		if canFlush {
+			flush.Flush()
+		}
+	}
+
+	// Delete config.json so subtask assignment regenerates from spec.cpp.
+	cfgPath := filepath.Join(contestDir, problemPath, "config.json")
+	if err := os.Remove(cfgPath); err == nil {
+		send("[rebuild] Removed existing config.json — will regenerate from spec.cpp")
+	}
+
+	builderImage := "ghcr.io/kevincornellius/tcforge-builder:" + tag
+	send(fmt.Sprintf("[rebuild] Running %s ...", builderImage))
+
+	cmd := exec.CommandContext(r.Context(), "docker", "run", "--rm",
+		"-v", hostContestDir+":/contest",
+		builderImage,
+		"/contest/"+problemPath,
+	)
+
+	// Merge stdout+stderr through an io.Pipe so we can scan lines while the
+	// process runs. The goroutine closes pw when the process finishes, which
+	// signals EOF to the scanner.
+	pr, pw := io.Pipe()
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+
+	if err := cmd.Start(); err != nil {
+		pr.Close()
+		pw.Close()
+		send("[rebuild] ERROR: " + err.Error())
+		send("DONE:error")
+		return
+	}
+
+	var cmdErr error
+	done := make(chan struct{})
+	go func() {
+		cmdErr = cmd.Wait()
+		pw.Close()
+		close(done)
+	}()
+
+	scanner := bufio.NewScanner(pr)
+	for scanner.Scan() {
+		send(scanner.Text())
+	}
+	<-done
+
+	if cmdErr != nil {
+		send("[rebuild] FAILED: " + cmdErr.Error())
+		send("DONE:error")
+		return
+	}
+	send("DONE:ok")
 }

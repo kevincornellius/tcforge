@@ -37,16 +37,24 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
+	version := os.Getenv("TCFORGE_VERSION")
+	if version == "" {
+		version = "unknown"
+	}
+
 	// Public
 	r.With(jsonMW).Get("/health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"ok":true}`)) })
+	r.With(jsonMW).Get("/api/version", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"version":"` + version + `"}`))
+	})
 	r.With(jsonMW).Post("/api/auth/login", handler.Login)
 	r.With(jsonMW).Get("/api/contest", handler.GetContest)
+	r.Get("/api/problems/{slug}/assets/*", handler.ServeAsset) // browsers fetch images without auth headers
 
-	// Problem assets + subtasks — auth + contest open required
+	// Subtasks — auth + contest open required
 	r.Group(func(r chi.Router) {
 		r.Use(handler.RequireAuth)
 		r.Use(handler.RequireContestOpen)
-		r.Get("/api/problems/{slug}/assets/*", handler.ServeAsset)
 		r.With(jsonMW).Get("/api/problems/{slug}/subtasks", handler.GetSubtasks)
 	})
 
@@ -103,11 +111,12 @@ func main() {
 		r.Delete("/api/admin/problems/{id}/statements/{stmtId}", handler.DeleteStatement)
 	})
 
-	// Statement upload — multipart, no jsonMW (handler sets Content-Type itself)
+	// Statement upload + rebuild — no jsonMW (handlers set Content-Type themselves)
 	r.Group(func(r chi.Router) {
 		r.Use(handler.RequireAuth)
 		r.Use(handler.RequireAdmin)
 		r.Post("/api/admin/problems/{id}/statements", handler.UploadStatement)
+		r.Post("/api/admin/problems/{id}/rebuild", handler.RebuildProblem)
 	})
 
 	// Serve pre-built React frontend (SPA fallback to index.html)

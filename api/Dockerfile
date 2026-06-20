@@ -21,7 +21,7 @@ RUN go build -o /bin/api ./api
 
 ### Stage 3: final image
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates docker-cli
 COPY --from=api-builder /bin/api /bin/api
 COPY --from=web-builder /web/dist /app/web/dist
 EXPOSE 8080

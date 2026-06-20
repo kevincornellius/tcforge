@@ -59,7 +59,7 @@ func ListSubmissions(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r.Context())
 
 	rows, err := db.DB.Query(`
-		SELECT s.id, p.slug, p.title, s.language, s.status, s.verdict, s.score, s.time_ms, s.submitted_at
+		SELECT s.id, p.slug, p.title, s.language, s.status, s.verdict, s.score, s.time_ms, s.submitted_at, s.graded_at
 		FROM submissions s JOIN problems p ON s.problem_id = p.id
 		WHERE s.user_id = ?
 		ORDER BY s.submitted_at DESC`, user.ID,
@@ -71,21 +71,22 @@ func ListSubmissions(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type row struct {
-		ID          int    `json:"id"`
-		ProblemSlug string `json:"problem_slug"`
-		ProblemTitle string `json:"problem_title"`
-		Language    string `json:"language"`
-		Status      string `json:"status"`
-		Verdict     string `json:"verdict"`
-		Score       int    `json:"score"`
-		TimeMs      int    `json:"time_ms"`
-		SubmittedAt string `json:"submitted_at"`
+		ID           int     `json:"id"`
+		ProblemSlug  string  `json:"problem_slug"`
+		ProblemTitle string  `json:"problem_title"`
+		Language     string  `json:"language"`
+		Status       string  `json:"status"`
+		Verdict      string  `json:"verdict"`
+		Score        int     `json:"score"`
+		TimeMs       int     `json:"time_ms"`
+		SubmittedAt  string  `json:"submitted_at"`
+		GradedAt     *string `json:"graded_at"`
 	}
 
 	results := []row{}
 	for rows.Next() {
 		var r row
-		rows.Scan(&r.ID, &r.ProblemSlug, &r.ProblemTitle, &r.Language, &r.Status, &r.Verdict, &r.Score, &r.TimeMs, &r.SubmittedAt)
+		rows.Scan(&r.ID, &r.ProblemSlug, &r.ProblemTitle, &r.Language, &r.Status, &r.Verdict, &r.Score, &r.TimeMs, &r.SubmittedAt, &r.GradedAt)
 		results = append(results, r)
 	}
 	json.NewEncoder(w).Encode(results)
@@ -95,22 +96,23 @@ func GetSubmission(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
 
 	var sub struct {
-		ID           int    `json:"id"`
-		ProblemSlug  string `json:"problem_slug"`
-		ProblemTitle string `json:"problem_title"`
-		Language     string `json:"language"`
-		Code         string `json:"code"`
-		Status       string `json:"status"`
-		Verdict      string `json:"verdict"`
-		Score        int    `json:"score"`
-		TimeMs       int    `json:"time_ms"`
-		SubmittedAt  string `json:"submitted_at"`
+		ID           int     `json:"id"`
+		ProblemSlug  string  `json:"problem_slug"`
+		ProblemTitle string  `json:"problem_title"`
+		Language     string  `json:"language"`
+		Code         string  `json:"code"`
+		Status       string  `json:"status"`
+		Verdict      string  `json:"verdict"`
+		Score        int     `json:"score"`
+		TimeMs       int     `json:"time_ms"`
+		SubmittedAt  string  `json:"submitted_at"`
+		GradedAt     *string `json:"graded_at"`
 	}
 	err := db.DB.QueryRow(`
-		SELECT s.id, p.slug, p.title, s.language, s.code, s.status, s.verdict, s.score, s.time_ms, s.submitted_at
+		SELECT s.id, p.slug, p.title, s.language, s.code, s.status, s.verdict, s.score, s.time_ms, s.submitted_at, s.graded_at
 		FROM submissions s JOIN problems p ON s.problem_id = p.id
 		WHERE s.id = ?`, id,
-	).Scan(&sub.ID, &sub.ProblemSlug, &sub.ProblemTitle, &sub.Language, &sub.Code, &sub.Status, &sub.Verdict, &sub.Score, &sub.TimeMs, &sub.SubmittedAt)
+	).Scan(&sub.ID, &sub.ProblemSlug, &sub.ProblemTitle, &sub.Language, &sub.Code, &sub.Status, &sub.Verdict, &sub.Score, &sub.TimeMs, &sub.SubmittedAt, &sub.GradedAt)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
