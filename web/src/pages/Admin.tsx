@@ -59,7 +59,7 @@ function ContestTab() {
       setScoring(cs.scoring)
       setAlwaysOpen(cs.always_open)
       setAllowSubmission(cs.allow_submission)
-    })
+    }).catch(e => setErr(e instanceof Error ? e.message : "Failed to load"))
   }
   useEffect(() => { load() }, [])
 
@@ -78,7 +78,14 @@ function ContestTab() {
     catch (e: unknown) { setErr(e instanceof Error ? e.message : "Failed") }
   }
 
-  if (!state) return <p>Loading…</p>
+  if (!state) return (
+    <div className="admin-section">
+      {err
+        ? <><p className="error">{err}</p><button onClick={load}>Retry</button></>
+        : <p>Loading…</p>
+      }
+    </div>
+  )
 
   const now = new Date()
   const started = state.start_at ? new Date(state.start_at) <= now : false

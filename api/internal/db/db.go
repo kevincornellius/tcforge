@@ -7,8 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
-	_ "github.com/lib/pq"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 )
 
@@ -49,20 +50,41 @@ func (d *Database) Query(query string, args ...any) (*sql.Rows, error) {
 	return d.DB.Query(d.rebind(query), args...)
 }
 
+// InsertReturningID runs an INSERT and returns the new row's id.
+// Uses RETURNING id for Postgres (LastInsertId is unsupported by pgx).
+func (d *Database) InsertReturningID(query string, args ...any) (int64, error) {
+	if d.postgres {
+		var id int64
+		err := d.DB.QueryRow(d.rebind(query+" RETURNING id"), args...).Scan(&id)
+		return id, err
+	}
+	res, err := d.DB.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
 func Init(contestDir string) error {
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL != "" {
+	if os.Getenv("DB_TYPE") == "psql" {
+		dbURL := os.Getenv("DATABASE_URL")
+		if dbURL == "" {
+			return fmt.Errorf("DB_TYPE=psql requires DATABASE_URL to be set")
+		}
 		return initPostgres(dbURL)
 	}
 	return initSQLite(contestDir)
 }
 
 func initPostgres(url string) error {
-	sqldb, err := sql.Open("postgres", url)
+	sqldb, err := sql.Open("pgx", url)
 	if err != nil {
 		return err
 	}
 	sqldb.SetMaxOpenConns(10)
+	sqldb.SetMaxIdleConns(1)                   // don't cache multiple idle connections — Neon closes them
+	sqldb.SetConnMaxLifetime(4 * time.Minute)  // recycle before Neon's 5-min auto-suspend
+	sqldb.SetConnMaxIdleTime(30 * time.Second) // drop idle connections quickly so stale ones aren't reused
 	DB = &Database{DB: sqldb, postgres: true}
 	log.Println("db: using postgres")
 	return migratePostgres()

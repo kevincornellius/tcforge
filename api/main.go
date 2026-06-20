@@ -44,7 +44,13 @@ func main() {
 	}
 
 	// Public
-	r.With(jsonMW).Get("/health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"ok":true}`)) })
+	r.With(jsonMW).Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		if err := db.DB.Ping(); err != nil {
+			http.Error(w, `{"ok":false}`, http.StatusServiceUnavailable)
+			return
+		}
+		w.Write([]byte(`{"ok":true}`))
+	})
 	r.With(jsonMW).Get("/api/version", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"version":"` + version + `"}`))
 	})

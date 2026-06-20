@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"database/sql"
 	"encoding/json"
 	"html"
 	"io"
@@ -84,8 +85,12 @@ func GetProblem(w http.ResponseWriter, r *http.Request) {
 	err := db.DB.QueryRow(
 		"SELECT id, slug, path, title, time_limit, memory_limit, position FROM problems WHERE slug = ?", slug,
 	).Scan(&p.ID, &p.Slug, &path, &p.Title, &p.TimeLimit, &p.MemoryLimit, &p.Position)
-	if err != nil {
+	if err == sql.ErrNoRows {
 		http.Error(w, "problem not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
 

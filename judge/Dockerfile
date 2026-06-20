@@ -1,4 +1,4 @@
-FROM golang:1.23-alpine AS judge-builder
+FROM golang:1.25-alpine AS judge-builder
 WORKDIR /src
 COPY go.work go.work.sum* ./
 COPY judge/go.mod judge/go.sum* ./judge/

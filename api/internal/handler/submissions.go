@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -41,16 +43,15 @@ func Submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := db.DB.Exec(
+	id, err := db.DB.InsertReturningID(
 		"INSERT INTO submissions (user_id, problem_id, language, code) VALUES (?, ?, ?, ?)",
 		user.ID, problemID, req.Language, req.Code,
 	)
 	if err != nil {
+		log.Printf("submit: insert error: %v", err)
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
-
-	id, _ := res.LastInsertId()
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]any{"id": id})
 }
@@ -113,8 +114,12 @@ func GetSubmission(w http.ResponseWriter, r *http.Request) {
 		FROM submissions s JOIN problems p ON s.problem_id = p.id
 		WHERE s.id = ?`, id,
 	).Scan(&sub.ID, &sub.ProblemSlug, &sub.ProblemTitle, &sub.Language, &sub.Code, &sub.Status, &sub.Verdict, &sub.Score, &sub.TimeMs, &sub.SubmittedAt, &sub.GradedAt)
-	if err != nil {
+	if err == sql.ErrNoRows {
 		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
 

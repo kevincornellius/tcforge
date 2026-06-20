@@ -68,13 +68,12 @@ func seedContestState(cfg contestConfig) {
 }
 
 func seedUsers(cfg contestConfig) error {
-	var count int
-	DB.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
-	if count > 0 {
-		return nil
-	}
-
 	for _, a := range cfg.Accounts {
+		var exists int
+		DB.QueryRow("SELECT COUNT(*) FROM users WHERE username = ?", a.Username).Scan(&exists)
+		if exists > 0 {
+			continue
+		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(a.Password), bcrypt.DefaultCost)
 		if err != nil {
 			return err
@@ -96,13 +95,12 @@ func seedUsers(cfg contestConfig) error {
 }
 
 func seedProblems(cfg contestConfig) error {
-	var count int
-	DB.QueryRow("SELECT COUNT(*) FROM problems").Scan(&count)
-	if count > 0 {
-		return nil
-	}
-
 	for i, p := range cfg.Problems {
+		var exists int
+		DB.QueryRow("SELECT COUNT(*) FROM problems WHERE slug = ?", p.ID).Scan(&exists)
+		if exists > 0 {
+			continue
+		}
 		tl := p.TimeLimit
 		if tl == 0 {
 			tl = 1

@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"time"
 
-	_ "github.com/lib/pq"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 )
 
@@ -48,17 +48,31 @@ func main() {
 	}
 
 	var db *sql.DB
-	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+	if os.Getenv("DB_TYPE") == "psql" {
 		judgeIsPostgres = true
-		var err error
+		dbURL := os.Getenv("DATABASE_URL")
+		if dbURL == "" {
+			log.Fatal("DB_TYPE=psql requires DATABASE_URL to be set")
+		}
 		for {
-			db, err = sql.Open("postgres", dbURL)
+			var err error
+			db, err = sql.Open("pgx", dbURL)
 			if err == nil {
 				if err = db.Ping(); err == nil {
 					break
 				}
 			}
 			log.Println("waiting for db:", err)
+			time.Sleep(2 * time.Second)
+		}
+		// Wait for the API to finish migrating (submissions table must exist)
+		for {
+			rows, err := db.Query("SELECT 1 FROM submissions LIMIT 0")
+			if err == nil {
+				rows.Close()
+				break
+			}
+			log.Println("waiting for schema:", err)
 			time.Sleep(2 * time.Second)
 		}
 		log.Println("judge: using postgres")
@@ -628,12 +642,10 @@ func runCase(lang, binPath, inFile, outFile, scorerPath, workDir string, timeLim
 		return tcScore{verdict: "IE"}, 0
 	}
 
-	// ulimit limits (all in KB):
-	//   -s 65536   : 64 MB stack — enough for deep recursion; prevents infinite-recursion from eating all RAM
-	//   -v <mem>   : virtual memory = problem limit + 256 MB overhead for runtime/stdlib
-	//   -f 131072  : 64 MB file writes — SIGXFSZ on overflow → RTE
+	// Resource limits applied as best-effort: ulimit -v is unsupported in some container
+	// environments (macOS Docker Desktop), so we use ; not && to avoid aborting the run.
 	vmKB := (memLimitMB + 256) * 1024
-	ulimitPrefix := fmt.Sprintf("ulimit -s 65536 && ulimit -v %d && ulimit -f 131072 && ", vmKB)
+	ulimitPrefix := fmt.Sprintf("ulimit -s 65536 2>/dev/null; ulimit -v %d 2>/dev/null; ulimit -f 131072 2>/dev/null; ", vmKB)
 	var cmd *exec.Cmd
 	switch lang {
 	case "cpp17", "cpp20":

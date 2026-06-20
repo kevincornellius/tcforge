@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/kevincornellius/tcforge/cli/internal/compose"
 	"github.com/kevincornellius/tcforge/cli/internal/config"
@@ -50,6 +52,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to start services: %w", err)
 	}
 
+	fmt.Print("Waiting for API to be ready")
+	waitHealthy("http://localhost:6174/health", 60*time.Second)
 	fmt.Println()
 	fmt.Println("Contest is live at: http://localhost:6174")
 
@@ -60,4 +64,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func waitHealthy(url string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 2 * time.Second}
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == 200 {
+				return
+			}
+		}
+		fmt.Print(".")
+		time.Sleep(500 * time.Millisecond)
+	}
 }

@@ -2,10 +2,12 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/kevincornellius/tcforge/api/internal/db"
 )
 
 type contextKey string
@@ -84,6 +86,14 @@ func userByToken(tokenStr string) (*User, error) {
 		return jwtSecret, nil
 	})
 	if err != nil {
+		return nil, err
+	}
+	// Verify the user still exists in this DB (guards against tokens from a different DB).
+	var exists int
+	if err := db.DB.QueryRow("SELECT 1 FROM users WHERE id = ?", c.UserID).Scan(&exists); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, jwt.ErrTokenInvalidClaims
+		}
 		return nil, err
 	}
 	return &User{

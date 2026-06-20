@@ -4,14 +4,16 @@
 
 ## Environment variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | No | Postgres connection string (e.g. from Neon). If not set, uses SQLite. |
-| `JWT_SECRET` | No | Secret for signing auth tokens. If not set, a random one is generated — users get logged out on every container restart. |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DB_TYPE` | No | `local` | `local` = SQLite on disk. `psql` = Postgres (requires `DATABASE_URL`). |
+| `DATABASE_URL` | Only if `DB_TYPE=psql` | — | Postgres connection string (e.g. from Neon). |
+| `JWT_SECRET` | No | `set_this_pls` | Secret for signing auth tokens. Users stay logged in across restarts. |
 
-**Recommended for any cloud deploy:** set both.
+**Recommended for any cloud deploy:**
 
 ```sh
+DB_TYPE=psql
 DATABASE_URL=postgres://user:pass@host/dbname   # from Neon free tier
 JWT_SECRET=$(openssl rand -hex 32)              # generate once, save it
 ```

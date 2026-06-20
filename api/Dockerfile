@@ -7,7 +7,7 @@ COPY web/ ./
 RUN npm run build
 
 ### Stage 2: build the Go API
-FROM golang:1.23-alpine AS api-builder
+FROM golang:1.25-alpine AS api-builder
 WORKDIR /src
 COPY go.work go.work.sum* ./
 COPY api/go.mod api/go.sum* ./api/

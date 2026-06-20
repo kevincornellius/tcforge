@@ -23,6 +23,16 @@ func Generate(contestDir, tag string) (string, error) {
 
 	composePath := filepath.Join(tcforgeDir, "docker-compose.yml")
 
+	// Forward optional env vars into containers if set in the host environment
+	extraAPI := ""
+	extraJudge := ""
+	for _, key := range []string{"DB_TYPE", "DATABASE_URL", "JWT_SECRET"} {
+		if val := os.Getenv(key); val != "" {
+			extraAPI += fmt.Sprintf("      - %s=%s\n", key, val)
+			extraJudge += fmt.Sprintf("      - %s=%s\n", key, val)
+		}
+	}
+
 	content := fmt.Sprintf(`services:
   api:
     image: %s
@@ -35,7 +45,13 @@ func Generate(contestDir, tag string) (string, error) {
       - TCFORGE_CONTEST_DIR=/contest
       - TCFORGE_HOST_CONTEST_DIR=%s
       - TCFORGE_VERSION=%s
-    restart: unless-stopped
+%s    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO/dev/null http://localhost:8080/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
     logging:
       driver: "json-file"
       options:
@@ -49,15 +65,16 @@ func Generate(contestDir, tag string) (string, error) {
       - %s:/contest
     environment:
       - TCFORGE_CONTEST_DIR=/contest
-    restart: unless-stopped
+%s    restart: unless-stopped
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-`, apiImage, contestDir, contestDir, tag, judgeImage, contestDir)
+`, apiImage, contestDir, contestDir, tag, extraAPI, judgeImage, contestDir, extraJudge)
 
 	if err := os.WriteFile(composePath, []byte(content), 0644); err != nil {
 		return "", err
