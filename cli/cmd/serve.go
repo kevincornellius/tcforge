@@ -48,7 +48,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Starting contest: %s\n", cfg.Contest.Name)
-	if err := compose.Up(composePath); err != nil {
+	if err := compose.Up(composePath, imageTag != "dev"); err != nil {
 		return fmt.Errorf("failed to start services: %w", err)
 	}
 

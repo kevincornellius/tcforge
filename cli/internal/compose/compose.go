@@ -83,8 +83,15 @@ func Generate(contestDir, tag string) (string, error) {
 }
 
 // Up runs docker compose up -d for the given compose file.
-// Uses --pull missing so locally built images (e.g. from dev.sh) take priority over the registry.
-func Up(composePath string) error {
+// pull=true pulls fresh images first (skipped for dev tag so local builds are used as-is).
+func Up(composePath string, pull bool) error {
+	if pull {
+		fmt.Println("Pulling latest images...")
+		pullCmd := exec.Command("docker", "compose", "-f", composePath, "pull", "--quiet")
+		pullCmd.Stdout = os.Stdout
+		pullCmd.Stderr = os.Stderr
+		_ = pullCmd.Run() // non-fatal: offline or first run may skip gracefully
+	}
 	cmd := exec.Command("docker", "compose", "-f", composePath, "up", "-d", "--pull", "missing")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

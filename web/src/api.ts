@@ -19,11 +19,13 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   })
   if (!res.ok) throw new Error(await res.text())
   if (res.status === 204) return undefined as T
-  return res.json()
+  const text = await res.text()
+  try { return JSON.parse(text) }
+  catch { throw new Error(`Server returned non-JSON (${res.status}): ${text.slice(0, 100)}`) }
 }
 
 export const api = {
-  version: () => fetch("/api/version").then(r => r.json() as Promise<{ version: string }>),
+  version: () => fetch("/api/version").then(r => r.ok ? r.json() as Promise<{ version: string }> : Promise.resolve({ version: "" })).catch(() => ({ version: "" })),
 
   login: (username: string, password: string) =>
     req<{ token: string; username: string; display_name: string; is_admin: boolean }>(

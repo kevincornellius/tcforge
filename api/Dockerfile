@@ -21,6 +21,8 @@ RUN go build -o /bin/api ./api
 
 ### Stage 3: final image
 FROM alpine:3.20
+ARG VERSION=dev
+ENV TCFORGE_VERSION=${VERSION}
 RUN apk add --no-cache ca-certificates docker-cli
 COPY --from=api-builder /bin/api /bin/api
 COPY --from=web-builder /web/dist /app/web/dist

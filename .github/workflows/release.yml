@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.25"
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -47,6 +47,7 @@ jobs:
             -t ghcr.io/kevincornellius/tcforge-builder:latest \
             ./docker/builder
           docker buildx build --platform linux/amd64,linux/arm64 --push \
+            --build-arg VERSION=$TAG \
             -t ghcr.io/kevincornellius/tcforge-api:$TAG \
             -t ghcr.io/kevincornellius/tcforge-api:latest \
             -f api/Dockerfile .

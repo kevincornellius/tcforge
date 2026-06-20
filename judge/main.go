@@ -702,6 +702,7 @@ func runCase(lang, binPath, inFile, outFile, scorerPath, workDir string, timeLim
 		return tcScore{verdict: "TLE"}, elapsed
 	}
 	if runErr != nil {
+		log.Printf("RTE: %v (elapsed %dms, limit %ds)", runErr, elapsed, timeLimitSec)
 		return tcScore{verdict: "RTE"}, elapsed
 	}
 

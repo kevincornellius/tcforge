@@ -126,11 +126,17 @@ func main() {
 		r.Post("/api/admin/problems/{id}/rebuild", handler.RebuildProblem)
 	})
 
+	// Unmatched /api/* routes — return 404 instead of falling through to SPA
+	r.Handle("/api/*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+	}))
+
 	// Serve pre-built React frontend (SPA fallback to index.html)
 	distDir := "/app/web/dist"
 	r.Handle("/*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		path := distDir + req.URL.Path
 		if _, err := os.Stat(path); os.IsNotExist(err) {
+			w.Header().Set("Cache-Control", "no-store")
 			http.ServeFile(w, req, distDir+"/index.html")
 			return
 		}

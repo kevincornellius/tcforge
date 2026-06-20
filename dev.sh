@@ -19,7 +19,7 @@ build_cli() {
 build_images() {
     echo "→ Building Docker images (tag: $TAG)..."
     docker build -t ghcr.io/kevincornellius/tcforge-builder:$TAG ./docker/builder &
-    docker build -t ghcr.io/kevincornellius/tcforge-api:$TAG    -f api/Dockerfile . &
+    docker build --build-arg VERSION=$TAG -t ghcr.io/kevincornellius/tcforge-api:$TAG -f api/Dockerfile . &
     docker build -t ghcr.io/kevincornellius/tcforge-judge:$TAG  -f judge/Dockerfile . &
     wait
     echo "  ✓ builder, api, judge images built with tag :$TAG"
