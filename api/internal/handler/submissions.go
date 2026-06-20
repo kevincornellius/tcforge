@@ -18,6 +18,16 @@ type submitRequest struct {
 func Submit(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r.Context())
 
+	if user == nil || !user.IsAdmin {
+		var alwaysOpen, allowSubmission int
+		db.DB.QueryRow("SELECT always_open, allow_submission FROM contest_state WHERE id=1").
+			Scan(&alwaysOpen, &allowSubmission)
+		if alwaysOpen == 1 && allowSubmission == 0 {
+			http.Error(w, "submissions are currently disabled", http.StatusForbidden)
+			return
+		}
+	}
+
 	var req submitRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)

@@ -33,6 +33,8 @@ function ContestTab() {
   const [duration, setDuration] = useState("")
   const [scoring, setScoring] = useState("ioi")
   const [alwaysOpen, setAlwaysOpen] = useState(true)
+  const [allowSubmission, setAllowSubmission] = useState(true)
+  const [scheduledStart, setScheduledStart] = useState("")
   const [err, setErr] = useState("")
   const [saving, setSaving] = useState(false)
 
@@ -43,6 +45,7 @@ function ContestTab() {
       setDuration(cs.duration)
       setScoring(cs.scoring)
       setAlwaysOpen(cs.always_open)
+      setAllowSubmission(cs.allow_submission)
     })
   }
   useEffect(() => { load() }, [])
@@ -51,7 +54,7 @@ function ContestTab() {
     e.preventDefault()
     setSaving(true); setErr("")
     try {
-      await api.admin.updateContest({ name, duration, scoring, always_open: alwaysOpen })
+      await api.admin.updateContest({ name, duration, scoring, always_open: alwaysOpen, allow_submission: allowSubmission })
       load()
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : "Failed") }
     finally { setSaving(false) }
@@ -82,9 +85,24 @@ function ContestTab() {
       </div>
 
       <div className="contest-actions">
-        {!running && <button className="btn-primary" onClick={() => act(api.admin.startContest)}>Start contest</button>}
-        {running  && <button className="btn-danger"  onClick={() => act(api.admin.stopContest)}>Stop contest</button>}
-        {(started || ended) && <button className="btn-ghost" onClick={() => act(api.admin.resetContest)}>Reset timer</button>}
+        {!running && (
+          <>
+            <input
+              type="datetime-local"
+              value={scheduledStart}
+              onChange={e => setScheduledStart(e.target.value)}
+              className="datetime-input"
+            />
+            <button
+              className="btn-primary"
+              onClick={() => act(() => api.admin.startContest(scheduledStart || undefined))}
+            >
+              {scheduledStart ? "Schedule start" : "Start now"}
+            </button>
+          </>
+        )}
+        {running  && <button className="btn-danger" onClick={() => act(api.admin.stopContest)}>Stop contest</button>}
+        {(started || ended) && <button className="btn-ghost" onClick={() => { setScheduledStart(""); act(api.admin.resetContest) }}>Reset timer</button>}
       </div>
 
       <form onSubmit={onSave} className="admin-form">
@@ -107,10 +125,21 @@ function ContestTab() {
           <span>
             Always open
             <span className="field-hint" style={{display:"block"}}>
-              When checked, contestants can access problems and submit at any time regardless of start/end time.
+              Skip time enforcement — contestants can view problems at any time.
             </span>
           </span>
         </label>
+        {alwaysOpen && (
+          <label className="admin-checkbox" style={{flexDirection:"row", gap:"0.5rem", alignItems:"center", marginLeft:"1.25rem"}}>
+            <input type="checkbox" checked={allowSubmission} onChange={e => setAllowSubmission(e.target.checked)} />
+            <span>
+              Allow submissions
+              <span className="field-hint" style={{display:"block"}}>
+                Uncheck to make the contest read-only (view problems, no submitting).
+              </span>
+            </span>
+          </label>
+        )}
         <button type="submit" disabled={saving}>{saving ? "Saving…" : "Save settings"}</button>
       </form>
     </div>

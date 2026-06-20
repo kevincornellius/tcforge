@@ -51,12 +51,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
-	fmt.Println("Contest is live at: http://localhost:3000")
+	fmt.Println("Contest is live at: http://localhost:6174")
 
 	if tunnel {
 		fmt.Println()
 		fmt.Println("To share publicly, run in a separate terminal:")
-		fmt.Println("  cloudflared tunnel --url http://localhost:3000")
+		fmt.Println("  cloudflared tunnel --url http://localhost:6174")
 	}
 
 	return nil

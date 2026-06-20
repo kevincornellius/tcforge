@@ -173,7 +173,8 @@ summary.group-summary::-webkit-details-marker { display: none; }
 .contest-badge.ended   { background: #f8d7da; color: #721c24; }
 .contest-badge.idle    { background: #e2e3e5; color: #383d41; }
 .contest-time { color: #666; font-size: 0.88rem; }
-.contest-actions { display: flex; gap: 0.65rem; margin-bottom: 1.5rem; }
+.contest-actions { display: flex; gap: 0.65rem; margin-bottom: 1.5rem; align-items: center; flex-wrap: wrap; }
+.datetime-input { padding: 0.45rem 0.65rem; border: 1px solid #ddd; border-radius: 4px; font-size: 0.9rem; color: #333; }
 .btn-primary { padding: 0.45rem 1.1rem; background: #1a1a2e; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
 .btn-primary:hover { background: #2d2d5e; }
 

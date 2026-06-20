@@ -12,21 +12,23 @@ import (
 )
 
 type ContestState struct {
-	Name       string  `json:"name"`
-	Duration   string  `json:"duration"`
-	Scoring    string  `json:"scoring"`
-	AlwaysOpen bool    `json:"always_open"`
-	StartAt    *string `json:"start_at"`
-	EndAt      *string `json:"end_at"`
+	Name            string  `json:"name"`
+	Duration        string  `json:"duration"`
+	Scoring         string  `json:"scoring"`
+	AlwaysOpen      bool    `json:"always_open"`
+	AllowSubmission bool    `json:"allow_submission"`
+	StartAt         *string `json:"start_at"`
+	EndAt           *string `json:"end_at"`
 }
 
 func GetContest(w http.ResponseWriter, r *http.Request) {
 	var cs ContestState
-	var alwaysOpen int
+	var alwaysOpen, allowSubmission int
 	var startAt, endAt sql.NullString
-	db.DB.QueryRow("SELECT name, duration, scoring, always_open, start_at, end_at FROM contest_state WHERE id=1").
-		Scan(&cs.Name, &cs.Duration, &cs.Scoring, &alwaysOpen, &startAt, &endAt)
+	db.DB.QueryRow("SELECT name, duration, scoring, always_open, allow_submission, start_at, end_at FROM contest_state WHERE id=1").
+		Scan(&cs.Name, &cs.Duration, &cs.Scoring, &alwaysOpen, &allowSubmission, &startAt, &endAt)
 	cs.AlwaysOpen = alwaysOpen == 1
+	cs.AllowSubmission = allowSubmission == 1
 	if startAt.Valid {
 		cs.StartAt = &startAt.String
 	}
@@ -38,10 +40,11 @@ func GetContest(w http.ResponseWriter, r *http.Request) {
 
 func UpdateContest(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name       string `json:"name"`
-		Duration   string `json:"duration"`
-		Scoring    string `json:"scoring"`
-		AlwaysOpen bool   `json:"always_open"`
+		Name            string `json:"name"`
+		Duration        string `json:"duration"`
+		Scoring         string `json:"scoring"`
+		AlwaysOpen      bool   `json:"always_open"`
+		AllowSubmission bool   `json:"allow_submission"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
@@ -50,12 +53,15 @@ func UpdateContest(w http.ResponseWriter, r *http.Request) {
 	if req.Scoring != "ioi" && req.Scoring != "icpc" {
 		req.Scoring = "ioi"
 	}
-	alwaysOpen := 0
+	alwaysOpen, allowSubmission := 0, 0
 	if req.AlwaysOpen {
 		alwaysOpen = 1
 	}
-	db.DB.Exec("UPDATE contest_state SET name=?, duration=?, scoring=?, always_open=? WHERE id=1",
-		req.Name, req.Duration, req.Scoring, alwaysOpen)
+	if req.AllowSubmission {
+		allowSubmission = 1
+	}
+	db.DB.Exec("UPDATE contest_state SET name=?, duration=?, scoring=?, always_open=?, allow_submission=? WHERE id=1",
+		req.Name, req.Duration, req.Scoring, alwaysOpen, allowSubmission)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -75,7 +81,7 @@ func IsContestOpen(user *User) (open bool, reason string) {
 		return true, ""
 	}
 	if !startAt.Valid {
-		return true, "" // no start time set → treat as open
+		return false, "contest has not been published yet"
 	}
 
 	now := time.Now()
@@ -95,15 +101,46 @@ func IsContestOpen(user *User) (open bool, reason string) {
 func StartContest(w http.ResponseWriter, r *http.Request) {
 	var dur string
 	db.DB.QueryRow("SELECT duration FROM contest_state WHERE id=1").Scan(&dur)
-	d, err := time.ParseDuration(dur)
-	if err != nil || d <= 0 {
-		http.Error(w, "invalid duration in contest settings", http.StatusBadRequest)
-		return
+
+	// Optional body: { "start_at": "2006-01-02T15:04" } for scheduled start
+	var body struct {
+		StartAt string `json:"start_at"` // local datetime-local value, e.g. "2006-01-02T15:04"
 	}
-	now := time.Now().UTC()
-	end := now.Add(d)
-	db.DB.Exec("UPDATE contest_state SET start_at=?, end_at=? WHERE id=1",
-		now.Format(time.RFC3339), end.Format(time.RFC3339))
+	json.NewDecoder(r.Body).Decode(&body)
+
+	var start time.Time
+	if body.StartAt != "" {
+		var err error
+		// Try RFC3339 first, then datetime-local format
+		start, err = time.ParseInLocation("2006-01-02T15:04", body.StartAt, time.Local)
+		if err != nil {
+			start, err = time.Parse(time.RFC3339, body.StartAt)
+		}
+		if err != nil {
+			http.Error(w, "invalid start_at format", http.StatusBadRequest)
+			return
+		}
+		start = start.UTC()
+	} else {
+		start = time.Now().UTC()
+	}
+
+	var end *time.Time
+	if dur != "" {
+		d, err := time.ParseDuration(dur)
+		if err == nil && d > 0 {
+			t := start.Add(d)
+			end = &t
+		}
+	}
+
+	if end != nil {
+		db.DB.Exec("UPDATE contest_state SET start_at=?, end_at=? WHERE id=1",
+			start.Format(time.RFC3339), end.Format(time.RFC3339))
+	} else {
+		db.DB.Exec("UPDATE contest_state SET start_at=?, end_at=NULL WHERE id=1",
+			start.Format(time.RFC3339))
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

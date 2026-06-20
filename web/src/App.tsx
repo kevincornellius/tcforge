@@ -1,7 +1,10 @@
 import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate } from "react-router-dom"
 import { AuthProvider, useAuth } from "./auth"
-import { useEffect, useState } from "react"
+import { createContext, useContext, useEffect, useState } from "react"
 import { api, ContestState } from "./api"
+
+export const ContestContext = createContext<ContestState | null>(null)
+export function useContest() { return useContext(ContestContext) }
 import Login from "./pages/Login"
 import Problems from "./pages/Problems"
 import Problem from "./pages/Problem"
@@ -85,13 +88,23 @@ function ContestGate({ children, contest }: { children: JSX.Element; contest: Co
   if (contest.always_open) return children
 
   const now = Date.now()
-  if (contest.start_at && new Date(contest.start_at).getTime() > now) {
-    const start = new Date(contest.start_at)
+
+  if (!contest.start_at) {
+    return (
+      <div className="contest-gate">
+        <div className="contest-gate-box">
+          <h2>Contest not yet published</h2>
+          <p>Check back later.</p>
+        </div>
+      </div>
+    )
+  }
+  if (new Date(contest.start_at).getTime() > now) {
     return (
       <div className="contest-gate">
         <div className="contest-gate-box">
           <h2>Contest hasn't started yet</h2>
-          <p>Starts at <strong>{start.toLocaleString()}</strong></p>
+          <p>Starts at <strong>{new Date(contest.start_at).toLocaleString()}</strong></p>
         </div>
       </div>
     )
@@ -125,6 +138,7 @@ function AppRoutes() {
   )
 
   return (
+    <ContestContext.Provider value={contest}>
     <>
       <Nav contest={contest} setContest={setContest} />
       <main>
@@ -140,6 +154,7 @@ function AppRoutes() {
         </Routes>
       </main>
     </>
+    </ContestContext.Provider>
   )
 }
 

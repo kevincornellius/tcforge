@@ -68,9 +68,9 @@ export const api = {
       req("PUT", `/admin/users/${id}/password`, { password }),
 
     // Contest settings
-    updateContest: (data: { name: string; duration: string; scoring: string; always_open: boolean }) =>
+    updateContest: (data: { name: string; duration: string; scoring: string; always_open: boolean; allow_submission: boolean }) =>
       req("PUT", "/admin/contest", data),
-    startContest: () => req("POST", "/admin/contest/start"),
+    startContest: (startAt?: string) => req("POST", "/admin/contest/start", startAt ? { start_at: startAt } : {}),
     stopContest: () => req("POST", "/admin/contest/stop"),
     resetContest: () => req("POST", "/admin/contest/reset"),
 
@@ -108,6 +108,7 @@ export interface ContestState {
   duration: string
   scoring: string
   always_open: boolean
+  allow_submission: boolean
   start_at: string | null
   end_at: string | null
 }

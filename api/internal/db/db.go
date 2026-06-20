@@ -90,15 +90,16 @@ func migrate() error {
 	);
 
 	CREATE TABLE IF NOT EXISTS contest_state (
-		id          INTEGER PRIMARY KEY CHECK (id = 1),
-		name        TEXT NOT NULL DEFAULT '',
-		duration    TEXT NOT NULL DEFAULT '',
-		scoring     TEXT NOT NULL DEFAULT 'ioi',
-		always_open INTEGER NOT NULL DEFAULT 1,
-		start_at    TEXT,
-		end_at      TEXT
+		id               INTEGER PRIMARY KEY CHECK (id = 1),
+		name             TEXT NOT NULL DEFAULT '',
+		duration         TEXT NOT NULL DEFAULT '',
+		scoring          TEXT NOT NULL DEFAULT 'ioi',
+		always_open      INTEGER NOT NULL DEFAULT 1,
+		allow_submission INTEGER NOT NULL DEFAULT 1,
+		start_at         TEXT,
+		end_at           TEXT
 	);
-	INSERT OR IGNORE INTO contest_state (id, name, duration, scoring, always_open) VALUES (1, '', '', 'ioi', 1);
+	INSERT OR IGNORE INTO contest_state (id, name, duration, scoring) VALUES (1, '', '', 'ioi');
 
 	CREATE TABLE IF NOT EXISTS announcements (
 		id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,8 +137,9 @@ func migrate() error {
 		always_open INTEGER NOT NULL DEFAULT 1,
 		start_at TEXT, end_at TEXT
 	)`)
-	DB.Exec(`INSERT OR IGNORE INTO contest_state (id, name, duration, scoring, always_open) VALUES (1,'','','ioi',1)`)
 	DB.Exec(`ALTER TABLE contest_state ADD COLUMN always_open INTEGER NOT NULL DEFAULT 1`)
+	DB.Exec(`ALTER TABLE contest_state ADD COLUMN allow_submission INTEGER NOT NULL DEFAULT 1`)
+	DB.Exec(`INSERT OR IGNORE INTO contest_state (id, name, duration, scoring) VALUES (1,'','','ioi')`)
 	DB.Exec(`CREATE TABLE IF NOT EXISTS announcements (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		message TEXT NOT NULL,

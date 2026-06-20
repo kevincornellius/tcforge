@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { api, Problem as ProblemType, Submission, StatementMeta } from "../api"
+import { useContest } from "../App"
 
 export default function Problem() {
   const { slug } = useParams<{ slug: string }>()
   const navigate = useNavigate()
+  const contest = useContest()
+  const canSubmit = !contest || contest.always_open ? (contest?.allow_submission ?? true) : true
   const [problem, setProblem] = useState<ProblemType | null>(null)
   const [statement, setStatement] = useState("")
   const [availLangs, setAvailLangs] = useState<StatementMeta[]>([])
@@ -85,8 +88,8 @@ export default function Problem() {
             <option value="cpp20">C++20</option>
             <option value="python3">Python 3</option>
           </select>
-          <button onClick={onSubmit} disabled={submitting || !code.trim()}>
-            {submitting ? "Submitting…" : "Submit"}
+          <button onClick={onSubmit} disabled={submitting || !code.trim() || !canSubmit}>
+            {submitting ? "Submitting…" : !canSubmit ? "Submissions disabled" : "Submit"}
           </button>
         </div>
         <textarea
