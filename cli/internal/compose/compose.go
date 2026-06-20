@@ -7,13 +7,15 @@ import (
 	"path/filepath"
 )
 
-const (
-	APIImage   = "ghcr.io/kevincornellius/tcforge-api:latest"
-	JudgeImage = "ghcr.io/kevincornellius/tcforge-judge:latest"
-)
+const registry = "ghcr.io/kevincornellius"
 
 // Generate writes a docker-compose.yml into .tcforge/ for the given contest dir.
-func Generate(contestDir string) (string, error) {
+func Generate(contestDir, tag string) (string, error) {
+	if tag == "" {
+		tag = "latest"
+	}
+	apiImage := registry + "/tcforge-api:" + tag
+	judgeImage := registry + "/tcforge-judge:" + tag
 	tcforgeDir := filepath.Join(contestDir, ".tcforge")
 	if err := os.MkdirAll(tcforgeDir, 0755); err != nil {
 		return "", err
@@ -42,7 +44,7 @@ func Generate(contestDir string) (string, error) {
     restart: unless-stopped
     depends_on:
       - api
-`, APIImage, contestDir, JudgeImage, contestDir)
+`, apiImage, contestDir, judgeImage, contestDir)
 
 	if err := os.WriteFile(composePath, []byte(content), 0644); err != nil {
 		return "", err

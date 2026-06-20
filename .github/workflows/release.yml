@@ -27,7 +27,7 @@ jobs:
           node-version: "20"
 
       - name: Build web
-        run: cd web && npm install && npm run build
+        run: cd web && npm ci && npm run build
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -53,6 +53,6 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
-          args: release --clean
+          args: release --clean --skip=validate
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

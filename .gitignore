@@ -10,6 +10,7 @@ tcforge
 # Node
 web/node_modules/
 web/dist/
+web/*.tsbuildinfo
 
 # OS
 .DS_Store

@@ -12,6 +12,7 @@ import (
 )
 
 var tunnel bool
+var imageTag string
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -21,6 +22,7 @@ var serveCmd = &cobra.Command{
 
 func init() {
 	serveCmd.Flags().BoolVar(&tunnel, "tunnel", false, "Print cloudflared tunnel instructions after starting")
+	serveCmd.Flags().StringVar(&imageTag, "tag", "", "Docker image tag to use (default: latest)")
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
@@ -38,7 +40,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	composePath, err := compose.Generate(cwd)
+	composePath, err := compose.Generate(cwd, imageTag)
 	if err != nil {
 		return fmt.Errorf("failed to generate compose file: %w", err)
 	}
