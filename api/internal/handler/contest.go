@@ -12,18 +12,21 @@ import (
 )
 
 type ContestState struct {
-	Name     string  `json:"name"`
-	Duration string  `json:"duration"`
-	Scoring  string  `json:"scoring"`
-	StartAt  *string `json:"start_at"`
-	EndAt    *string `json:"end_at"`
+	Name       string  `json:"name"`
+	Duration   string  `json:"duration"`
+	Scoring    string  `json:"scoring"`
+	AlwaysOpen bool    `json:"always_open"`
+	StartAt    *string `json:"start_at"`
+	EndAt      *string `json:"end_at"`
 }
 
 func GetContest(w http.ResponseWriter, r *http.Request) {
 	var cs ContestState
+	var alwaysOpen int
 	var startAt, endAt sql.NullString
-	db.DB.QueryRow("SELECT name, duration, scoring, start_at, end_at FROM contest_state WHERE id=1").
-		Scan(&cs.Name, &cs.Duration, &cs.Scoring, &startAt, &endAt)
+	db.DB.QueryRow("SELECT name, duration, scoring, always_open, start_at, end_at FROM contest_state WHERE id=1").
+		Scan(&cs.Name, &cs.Duration, &cs.Scoring, &alwaysOpen, &startAt, &endAt)
+	cs.AlwaysOpen = alwaysOpen == 1
 	if startAt.Valid {
 		cs.StartAt = &startAt.String
 	}
@@ -35,9 +38,10 @@ func GetContest(w http.ResponseWriter, r *http.Request) {
 
 func UpdateContest(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name     string `json:"name"`
-		Duration string `json:"duration"`
-		Scoring  string `json:"scoring"`
+		Name       string `json:"name"`
+		Duration   string `json:"duration"`
+		Scoring    string `json:"scoring"`
+		AlwaysOpen bool   `json:"always_open"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
@@ -46,9 +50,46 @@ func UpdateContest(w http.ResponseWriter, r *http.Request) {
 	if req.Scoring != "ioi" && req.Scoring != "icpc" {
 		req.Scoring = "ioi"
 	}
-	db.DB.Exec("UPDATE contest_state SET name=?, duration=?, scoring=? WHERE id=1",
-		req.Name, req.Duration, req.Scoring)
+	alwaysOpen := 0
+	if req.AlwaysOpen {
+		alwaysOpen = 1
+	}
+	db.DB.Exec("UPDATE contest_state SET name=?, duration=?, scoring=?, always_open=? WHERE id=1",
+		req.Name, req.Duration, req.Scoring, alwaysOpen)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// IsContestOpen returns true if submissions are currently allowed.
+// Admins always bypass. Non-admins: always_open=true → open;
+// otherwise open only if start_at is set and now is within [start_at, end_at].
+func IsContestOpen(user *User) (open bool, reason string) {
+	if user != nil && user.IsAdmin {
+		return true, ""
+	}
+	var alwaysOpen int
+	var startAt, endAt sql.NullString
+	db.DB.QueryRow("SELECT always_open, start_at, end_at FROM contest_state WHERE id=1").
+		Scan(&alwaysOpen, &startAt, &endAt)
+
+	if alwaysOpen == 1 {
+		return true, ""
+	}
+	if !startAt.Valid {
+		return true, "" // no start time set → treat as open
+	}
+
+	now := time.Now()
+	start, _ := time.Parse(time.RFC3339, startAt.String)
+	if now.Before(start) {
+		return false, "contest has not started yet"
+	}
+	if endAt.Valid {
+		end, _ := time.Parse(time.RFC3339, endAt.String)
+		if now.After(end) {
+			return false, "contest has ended"
+		}
+	}
+	return true, ""
 }
 
 func StartContest(w http.ResponseWriter, r *http.Request) {

@@ -68,7 +68,7 @@ export const api = {
       req("PUT", `/admin/users/${id}/password`, { password }),
 
     // Contest settings
-    updateContest: (data: { name: string; duration: string; scoring: string }) =>
+    updateContest: (data: { name: string; duration: string; scoring: string; always_open: boolean }) =>
       req("PUT", "/admin/contest", data),
     startContest: () => req("POST", "/admin/contest/start"),
     stopContest: () => req("POST", "/admin/contest/stop"),
@@ -107,6 +107,7 @@ export interface ContestState {
   name: string
   duration: string
   scoring: string
+  always_open: boolean
   start_at: string | null
   end_at: string | null
 }
@@ -131,6 +132,7 @@ export interface Submission {
   problem_slug: string
   problem_title: string
   language: string
+  code?: string        // only returned by GET /submissions/:id
   status: string
   verdict: string
   score: number

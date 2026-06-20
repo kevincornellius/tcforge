@@ -27,7 +27,7 @@ func Generate(contestDir, tag string) (string, error) {
   api:
     image: %s
     ports:
-      - "3000:8080"
+      - "6174:8080"
     volumes:
       - %s:/contest
     environment:

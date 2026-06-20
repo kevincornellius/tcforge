@@ -214,6 +214,18 @@ summary.group-summary::-webkit-details-marker { display: none; }
 /* PDF embed */
 .pdf-embed { margin-bottom: 1rem; }
 
+/* Source code */
+.source-section { margin-top: 1.5rem; }
+.source-code { background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 6px; font-family: "Fira Mono", monospace; font-size: 0.85rem; overflow-x: auto; white-space: pre; margin-top: 0.5rem; max-height: 600px; overflow-y: auto; }
+.copy-btn { margin-left: auto; padding: 0.15rem 0.6rem; font-size: 0.8rem; background: #444; color: #eee; border: none; border-radius: 4px; cursor: pointer; }
+.copy-btn:hover { background: #555; }
+
+/* Contest gate */
+.contest-gate { display: flex; align-items: center; justify-content: center; min-height: 60vh; }
+.contest-gate-box { text-align: center; background: #fff; padding: 3rem; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.1); }
+.contest-gate-box h2 { margin-bottom: 0.75rem; color: #1a1a2e; }
+.contest-gate-box p { color: #555; }
+
 /* Misc */
 .error { color: #cb2431; font-size: 0.9rem; margin-top: 0.5rem; }
 .judging-status { color: #888; margin-top: 1rem; }

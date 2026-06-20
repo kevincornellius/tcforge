@@ -38,6 +38,19 @@ func RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
+// RequireContestOpen blocks non-admins when the contest isn't running.
+// Always-open contests and contests without a start_at set are never blocked.
+func RequireContestOpen(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := userFromContext(r.Context())
+		if open, reason := IsContestOpen(user); !open {
+			http.Error(w, reason, http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func RequireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := userFromContext(r.Context())

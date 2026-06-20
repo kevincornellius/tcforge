@@ -32,6 +32,7 @@ function ContestTab() {
   const [name, setName] = useState("")
   const [duration, setDuration] = useState("")
   const [scoring, setScoring] = useState("ioi")
+  const [alwaysOpen, setAlwaysOpen] = useState(true)
   const [err, setErr] = useState("")
   const [saving, setSaving] = useState(false)
 
@@ -41,6 +42,7 @@ function ContestTab() {
       setName(cs.name)
       setDuration(cs.duration)
       setScoring(cs.scoring)
+      setAlwaysOpen(cs.always_open)
     })
   }
   useEffect(() => { load() }, [])
@@ -49,7 +51,7 @@ function ContestTab() {
     e.preventDefault()
     setSaving(true); setErr("")
     try {
-      await api.admin.updateContest({ name, duration, scoring })
+      await api.admin.updateContest({ name, duration, scoring, always_open: alwaysOpen })
       load()
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : "Failed") }
     finally { setSaving(false) }
@@ -99,6 +101,15 @@ function ContestTab() {
             <option value="ioi">IOI (partial, per-subtask)</option>
             <option value="icpc">ICPC (all-or-nothing, stop on first fail)</option>
           </select>
+        </label>
+        <label className="admin-checkbox" style={{flexDirection:"row", gap:"0.5rem", alignItems:"center"}}>
+          <input type="checkbox" checked={alwaysOpen} onChange={e => setAlwaysOpen(e.target.checked)} />
+          <span>
+            Always open
+            <span className="field-hint" style={{display:"block"}}>
+              When checked, contestants can access problems and submit at any time regardless of start/end time.
+            </span>
+          </span>
         </label>
         <button type="submit" disabled={saving}>{saving ? "Saving…" : "Save settings"}</button>
       </form>

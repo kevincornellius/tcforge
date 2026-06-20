@@ -7,6 +7,19 @@ interface SubtaskConfig {
   points: number[]         // [j] = points for subtask j+1
 }
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  function copy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+  return (
+    <button className="copy-btn" onClick={copy}>{copied ? "Copied!" : "Copy"}</button>
+  )
+}
+
 export default function Submission() {
   const { id } = useParams<{ id: string }>()
   const [sub, setSub] = useState<Sub | null>(null)
@@ -152,6 +165,17 @@ export default function Submission() {
             <VerdictTable verdicts={verdicts} />
           )}
         </div>
+      )}
+
+      {sub.code && (
+        <details className="source-section">
+          <summary className="group-summary">
+            Source code
+            <span className="tc-count">{sub.language}</span>
+            <CopyButton text={sub.code} />
+          </summary>
+          <pre className="source-code">{sub.code}</pre>
+        </details>
       )}
     </div>
   )

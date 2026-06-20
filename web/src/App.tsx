@@ -33,18 +33,10 @@ function useCountdown(endAt: string | null): string {
   return display
 }
 
-function Nav() {
+function Nav({ contest, setContest }: { contest: ContestState | null; setContest: (c: ContestState) => void }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
-  const [contest, setContest] = useState<ContestState | null>(null)
-
-  useEffect(() => {
-    if (!user) return
-    api.contest().then(setContest).catch(() => {})
-    // Refresh contest state every 30s (picks up admin start/stop)
-    const id = setInterval(() => api.contest().then(setContest).catch(() => {}), 30000)
-    return () => clearInterval(id)
-  }, [user])
+  void setContest // consumed by AppRoutes; passed here only so Nav can trigger refresh if needed
 
   const countdown = useCountdown(contest?.end_at ?? null)
 
@@ -86,17 +78,62 @@ function RequireAuth({ children }: { children: JSX.Element }) {
   return children
 }
 
+function ContestGate({ children, contest }: { children: JSX.Element; contest: ContestState | null }) {
+  const { user } = useAuth()
+  if (!contest || user?.is_admin) return children
+
+  if (contest.always_open) return children
+
+  const now = Date.now()
+  if (contest.start_at && new Date(contest.start_at).getTime() > now) {
+    const start = new Date(contest.start_at)
+    return (
+      <div className="contest-gate">
+        <div className="contest-gate-box">
+          <h2>Contest hasn't started yet</h2>
+          <p>Starts at <strong>{start.toLocaleString()}</strong></p>
+        </div>
+      </div>
+    )
+  }
+  if (contest.end_at && new Date(contest.end_at).getTime() < now) {
+    return (
+      <div className="contest-gate">
+        <div className="contest-gate-box">
+          <h2>Contest has ended</h2>
+          <p>Submissions are closed.</p>
+        </div>
+      </div>
+    )
+  }
+  return children
+}
+
 function AppRoutes() {
+  const [contest, setContest] = useState<ContestState | null>(null)
+  const { user } = useAuth()
+
+  useEffect(() => {
+    if (!user) return
+    api.contest().then(setContest).catch(() => {})
+    const id = setInterval(() => api.contest().then(setContest).catch(() => {}), 30000)
+    return () => clearInterval(id)
+  }, [user])
+
+  const gate = (el: JSX.Element) => (
+    <RequireAuth><ContestGate contest={contest}>{el}</ContestGate></RequireAuth>
+  )
+
   return (
     <>
-      <Nav />
+      <Nav contest={contest} setContest={setContest} />
       <main>
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route path="/problems" element={<RequireAuth><Problems /></RequireAuth>} />
-          <Route path="/problems/:slug" element={<RequireAuth><Problem /></RequireAuth>} />
-          <Route path="/submissions/:id" element={<RequireAuth><Submission /></RequireAuth>} />
-          <Route path="/scoreboard" element={<RequireAuth><Scoreboard /></RequireAuth>} />
+          <Route path="/problems" element={gate(<Problems />)} />
+          <Route path="/problems/:slug" element={gate(<Problem />)} />
+          <Route path="/submissions/:id" element={gate(<Submission />)} />
+          <Route path="/scoreboard" element={gate(<Scoreboard />)} />
           <Route path="/announcements" element={<RequireAuth><Announcements /></RequireAuth>} />
           <Route path="/admin" element={<RequireAuth><Admin /></RequireAuth>} />
           <Route path="*" element={<Navigate to="/problems" replace />} />

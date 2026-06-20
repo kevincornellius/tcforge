@@ -42,17 +42,29 @@ func main() {
 	r.With(jsonMW).Post("/api/auth/login", handler.Login)
 	r.With(jsonMW).Get("/api/contest", handler.GetContest)
 
-	// Public — asset serving and subtask/statement config
-	r.Get("/api/problems/{slug}/assets/*", handler.ServeAsset)
-	r.With(jsonMW).Get("/api/problems/{slug}/subtasks", handler.GetSubtasks)
+	// Problem assets + subtasks — auth + contest open required
+	r.Group(func(r chi.Router) {
+		r.Use(handler.RequireAuth)
+		r.Use(handler.RequireContestOpen)
+		r.Get("/api/problems/{slug}/assets/*", handler.ServeAsset)
+		r.With(jsonMW).Get("/api/problems/{slug}/subtasks", handler.GetSubtasks)
+	})
 
-	// Authenticated
+	// Authenticated — always accessible (auth, announcements)
 	r.Group(func(r chi.Router) {
 		r.Use(handler.RequireAuth)
 		r.Use(jsonMW)
 
 		r.Post("/api/auth/logout", handler.Logout)
 		r.Get("/api/auth/me", handler.Me)
+		r.Get("/api/announcements", handler.ListAnnouncements)
+	})
+
+	// Authenticated + contest must be open (problems, submissions, scoreboard)
+	r.Group(func(r chi.Router) {
+		r.Use(handler.RequireAuth)
+		r.Use(handler.RequireContestOpen)
+		r.Use(jsonMW)
 
 		r.Get("/api/problems", handler.ListProblems)
 		r.Get("/api/problems/{slug}", handler.GetProblem)
@@ -63,7 +75,6 @@ func main() {
 		r.Get("/api/submissions/{id}", handler.GetSubmission)
 
 		r.Get("/api/scoreboard", handler.GetScoreboard)
-		r.Get("/api/announcements", handler.ListAnnouncements)
 	})
 
 	// Admin routes — with jsonMW (JSON-only endpoints)
