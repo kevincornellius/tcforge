@@ -26,4 +26,5 @@ func init() {
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(pushCmd)
+	rootCmd.AddCommand(deployCmd)
 }
