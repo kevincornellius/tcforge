@@ -23,9 +23,8 @@ builds:
 
 archives:
   - id: tcforge
-    builds: [tcforge]
     name_template: "tcforge-{{ .Os }}-{{ .Arch }}"
-    format: binary
+    formats: [binary]
 
 checksum:
   name_template: "checksums.txt"
@@ -38,11 +37,11 @@ changelog:
       - "^test:"
       - "^chore:"
 
-brews:
-  - repository:
-      owner: kevincornellius
-      name: homebrew-tap
-    name: tcforge
-    homepage: "https://github.com/kevincornellius/tcforge"
-    description: "Local contest hosting powered by tcframe"
-    install: bin.install "tcforge"
+# brews:
+#   - repository:
+#       owner: kevincornellius
+#       name: homebrew-tap
+#     name: tcforge
+#     homepage: "https://github.com/kevincornellius/tcforge"
+#     description: "Local contest hosting powered by tcframe"
+#     install: bin.install "tcforge"
