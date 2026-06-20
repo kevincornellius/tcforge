@@ -71,13 +71,14 @@ func migrate() error {
 	);
 
 	CREATE TABLE IF NOT EXISTS verdicts (
-		id            INTEGER PRIMARY KEY AUTOINCREMENT,
-		submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
-		test_case     TEXT NOT NULL,
-		verdict       TEXT NOT NULL,
-		time_ms       INTEGER NOT NULL DEFAULT 0,
-		memory_kb     INTEGER NOT NULL DEFAULT 0,
-		group_num     INTEGER NOT NULL DEFAULT 0
+		id              INTEGER PRIMARY KEY AUTOINCREMENT,
+		submission_id   INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+		test_case       TEXT NOT NULL,
+		verdict         TEXT NOT NULL,
+		time_ms         INTEGER NOT NULL DEFAULT 0,
+		memory_kb       INTEGER NOT NULL DEFAULT 0,
+		group_num       INTEGER NOT NULL DEFAULT 0,
+		points_fraction REAL NOT NULL DEFAULT 1.0
 	);
 
 	CREATE TABLE IF NOT EXISTS subtask_scores (
@@ -121,6 +122,7 @@ func migrate() error {
 	}
 	// Migrate existing DBs — ignore errors if columns/tables already exist
 	DB.Exec("ALTER TABLE verdicts ADD COLUMN group_num INTEGER NOT NULL DEFAULT 0")
+	DB.Exec("ALTER TABLE verdicts ADD COLUMN points_fraction REAL NOT NULL DEFAULT 1.0")
 	DB.Exec(`CREATE TABLE IF NOT EXISTS subtask_scores (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,

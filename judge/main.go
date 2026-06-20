@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -147,12 +148,38 @@ func totalMaxScore(sr []subtaskScoreResult) int {
 	return t
 }
 
+// tcScore carries the grading result of one test case, matching tcframe's TestCaseVerdict model.
+// For OK verdicts, exactly one of absPoints/isPct is meaningful.
+type tcScore struct {
+	verdict   string  // "AC", "WA", "OK", "RTE", "TLE", "IE"
+	absPoints float64 // OK <n>  — absolute points
+	isPct     bool    // true when OK <n>%
+	pct       float64 // OK <n>% — percentage (0–100)
+}
+
+// pointsFraction converts tcScore to a 0–1 value for DB storage / display.
+// For OK-absolute, stores the raw point value (caller must know the context).
+func (s tcScore) pointsFraction() float64 {
+	switch s.verdict {
+	case "AC":
+		return 1.0
+	case "OK":
+		if s.isPct {
+			return s.pct / 100.0
+		}
+		return s.absPoints // raw absolute — not normalised
+	default:
+		return 0.0
+	}
+}
+
 type tcVerdict struct {
-	testCase string
-	verdict  string
-	timeMs   int
-	memKb    int
-	groupNum int
+	testCase       string
+	verdict        string
+	timeMs         int
+	memKb          int
+	groupNum       int
+	pointsFraction float64
 }
 
 type subtaskScoreResult struct {
@@ -179,9 +206,74 @@ func parseGroupNum(base string) int {
 }
 
 func writeVerdict(db *sql.DB, subID int, tc tcVerdict) {
-	db.Exec(`INSERT INTO verdicts (submission_id, test_case, verdict, time_ms, memory_kb, group_num)
-		VALUES (?,?,?,?,?,?)`,
-		subID, tc.testCase, tc.verdict, tc.timeMs, tc.memKb, tc.groupNum)
+	db.Exec(`INSERT INTO verdicts (submission_id, test_case, verdict, time_ms, memory_kb, group_num, points_fraction)
+		VALUES (?,?,?,?,?,?,?)`,
+		subID, tc.testCase, tc.verdict, tc.timeMs, tc.memKb, tc.groupNum, tc.pointsFraction)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// parseCheckerVerdict parses scorer or communicator output.
+//
+// tcframe verdict format (matches TestCaseVerdictParser.hpp):
+//
+//	Line 1: AC | WA | OK
+//	Line 2: (only for OK) <points> or <pct>%
+//
+// Scorer writes verdict to stdout; communicator writes to stderr.
+func parseCheckerVerdict(output string) tcScore {
+	lines := strings.Split(strings.TrimRight(output, "\n\r"), "\n")
+	if len(lines) == 0 {
+		return tcScore{verdict: "WA"}
+	}
+	first := strings.TrimSpace(lines[0])
+	switch first {
+	case "AC":
+		return tcScore{verdict: "AC"}
+	case "WA":
+		return tcScore{verdict: "WA"}
+	case "OK":
+		if len(lines) < 2 {
+			return tcScore{verdict: "WA"} // malformed — treat as WA
+		}
+		val := strings.TrimSpace(strings.Fields(lines[1])[0])
+		if strings.HasSuffix(val, "%") {
+			pct, err := strconv.ParseFloat(strings.TrimSuffix(val, "%"), 64)
+			if err == nil {
+				return tcScore{verdict: "OK", isPct: true, pct: pct}
+			}
+		} else {
+			pts, err := strconv.ParseFloat(val, 64)
+			if err == nil {
+				return tcScore{verdict: "OK", absPoints: pts}
+			}
+		}
+	}
+	return tcScore{verdict: "WA"}
+}
+
+// effectivePts returns the effective score for one TC under MinAggregator semantics.
+//
+// tcframe MinAggregator (used when hasSubtasks=true):
+//   - AC          → subtaskMax (no constraint)
+//   - OK <pts>    → pts absolute
+//   - OK <pct>%   → pct * subtaskMax / 100
+//   - WA/RTE/...  → 0
+func (s tcScore) effectivePts(subtaskMax float64) float64 {
+	switch s.verdict {
+	case "AC":
+		return subtaskMax
+	case "OK":
+		if s.isPct {
+			return s.pct * subtaskMax / 100.0
+		}
+		return s.absPoints
+	default:
+		return 0
+	}
 }
 
 func judge(db *sql.DB, sub submission, contestDir, scoring string) (
@@ -189,6 +281,11 @@ func judge(db *sql.DB, sub submission, contestDir, scoring string) (
 ) {
 	problemDir := filepath.Join(contestDir, sub.ProblemPath)
 	tcDir := filepath.Join(problemDir, "tc")
+
+	scorerPath := filepath.Join(problemDir, "scorer")
+	communicatorPath := filepath.Join(problemDir, "communicator")
+	isInteractive := fileExists(communicatorPath)
+	hasCustomScorer := !isInteractive && fileExists(scorerPath)
 
 	inFiles, err := filepath.Glob(filepath.Join(tcDir, "*.in"))
 	if err != nil || len(inFiles) == 0 {
@@ -208,9 +305,12 @@ func judge(db *sql.DB, sub submission, contestDir, scoring string) (
 		return "CE", 0, 0, nil
 	}
 
-	groupResults := map[int][]string{}
+	// groupScores[groupNum] = per-TC scores in the order they were run.
+	groupScores := map[int][]tcScore{}
+	// failedGroups: set when a TC produces a zero-effective-points verdict (WA/RTE/TLE).
+	// Safe to skip remaining TCs in that group — MinAggregator/SumAggregator can't improve.
 	failedGroups := map[int]bool{}
-	var lastVerdict string
+	var icpcFailVerdict string // first non-AC verdict for ICPC result
 
 	for _, inFile := range inFiles {
 		base := strings.TrimSuffix(filepath.Base(inFile), ".in")
@@ -219,42 +319,58 @@ func judge(db *sql.DB, sub submission, contestDir, scoring string) (
 			continue // skip samples
 		}
 
-		// ICPC: stop on first failure
-		if scoring == "icpc" && lastVerdict != "" && lastVerdict != "AC" {
+		// ICPC: stop after first failure
+		if scoring == "icpc" && icpcFailVerdict != "" {
 			break
 		}
 
-		// IOI: skip remaining TCs in a failed group
+		// Skip remaining TCs in a zero-effective group (WA/RTE/TLE).
+		// OK verdicts don't trigger this — remaining TCs may lower the min further.
 		if scoring != "icpc" && failedGroups[groupNum] {
 			continue
 		}
 
-		v, tMs := runCase(sub.Language, binPath, inFile,
-			strings.TrimSuffix(inFile, ".in")+".out", sub.TimeLimit)
+		var ts tcScore
+		var tMs int
+
+		if isInteractive {
+			ts, tMs = runCaseInteractive(sub.Language, binPath, inFile, communicatorPath, tmpDir, sub.TimeLimit)
+		} else {
+			outFile := strings.TrimSuffix(inFile, ".in") + ".out"
+			checkerArg := ""
+			if hasCustomScorer {
+				checkerArg = scorerPath
+			}
+			ts, tMs = runCase(sub.Language, binPath, inFile, outFile, checkerArg, tmpDir, sub.TimeLimit)
+		}
 
 		if tMs > maxTimeMs {
 			maxTimeMs = tMs
 		}
-		lastVerdict = v
 
-		// Write verdict to DB immediately so frontend sees live progress
+		if scoring == "icpc" && ts.verdict != "AC" && icpcFailVerdict == "" {
+			icpcFailVerdict = ts.verdict
+		}
+
 		writeVerdict(db, sub.ID, tcVerdict{
-			testCase: base, verdict: v, timeMs: tMs, groupNum: groupNum,
+			testCase:       base,
+			verdict:        ts.verdict,
+			timeMs:         tMs,
+			groupNum:       groupNum,
+			pointsFraction: ts.pointsFraction(),
 		})
 
-		groupResults[groupNum] = append(groupResults[groupNum], v)
-		if v != "AC" {
+		groupScores[groupNum] = append(groupScores[groupNum], ts)
+
+		// Only mark group as failed for zero-contribution verdicts (not OK).
+		if ts.verdict != "AC" && ts.verdict != "OK" {
 			failedGroups[groupNum] = true
 		}
 	}
 
 	if scoring == "icpc" {
-		for _, vs := range groupResults {
-			for _, v := range vs {
-				if v != "AC" {
-					return v, 0, maxTimeMs, nil
-				}
-			}
+		if icpcFailVerdict != "" {
+			return icpcFailVerdict, 0, maxTimeMs, nil
 		}
 		return "AC", 100, maxTimeMs, nil
 	}
@@ -262,32 +378,47 @@ func judge(db *sql.DB, sub submission, contestDir, scoring string) (
 	// IOI scoring
 	cfg := loadProblemConfig(problemDir)
 	if cfg != nil {
-		return scoreIOIWithConfig(groupResults, maxTimeMs, cfg)
+		return scoreIOIWithConfig(groupScores, maxTimeMs, cfg)
 	}
-	return scoreIOIGroupEqual(groupResults, maxTimeMs)
+	return scoreIOIGroupEqual(groupScores, maxTimeMs)
 }
 
-// scoreIOIWithConfig: subtask i passes iff ALL groups listing i are fully AC.
+// scoreIOIWithConfig uses tcframe's MinAggregator semantics:
+// subtask score = min(effectivePts(tc, subtaskMax)) across all TCs in the subtask.
+//
+// This naturally handles both the all-or-nothing case (AC/WA only) and partial
+// credit (OK <pts>), matching how tcframe's grader aggregates results.
 func scoreIOIWithConfig(
-	groupResults map[int][]string, maxTimeMs int, cfg *problemConfig,
+	groupScores map[int][]tcScore, maxTimeMs int, cfg *problemConfig,
 ) (finalVerdict string, score, _ int, subtaskResults []subtaskScoreResult) {
 	for s := 1; s <= len(cfg.Points); s++ {
-		subtaskAC := true
+		maxPts := float64(cfg.Points[s-1])
+		subtaskScore := maxPts // start at maximum; each TC can only lower this
+		hasTCs := false
+
 		for gIdx, subtasks := range cfg.TestGroups {
 			groupNum := gIdx + 1
 			for _, sub := range subtasks {
-				if sub == s {
-					for _, v := range groupResults[groupNum] {
-						if v != "AC" {
-							subtaskAC = false
-						}
+				if sub != s {
+					continue
+				}
+				for _, tc := range groupScores[groupNum] {
+					hasTCs = true
+					eff := tc.effectivePts(maxPts)
+					if eff < subtaskScore {
+						subtaskScore = eff
 					}
 				}
 			}
 		}
-		pts, verdict := 0, "WA"
-		if subtaskAC {
-			pts = cfg.Points[s-1]
+
+		if !hasTCs {
+			subtaskScore = maxPts // no TCs for this subtask → don't penalise
+		}
+
+		pts := int(math.Round(subtaskScore))
+		verdict := "WA"
+		if pts >= cfg.Points[s-1] {
 			verdict = "AC"
 		}
 		score += pts
@@ -305,12 +436,14 @@ func scoreIOIWithConfig(
 	return
 }
 
-// scoreIOIGroupEqual: treat each group as equal-weight subtask when no config.json.
+// scoreIOIGroupEqual uses tcframe's SumAggregator semantics when no config.json:
+// each TC earns its share of the group's points (equal weight per TC);
+// OK <pts> contributes absolute points; OK <pct>% contributes pct% of the TC share.
 func scoreIOIGroupEqual(
-	groupResults map[int][]string, maxTimeMs int,
+	groupScores map[int][]tcScore, maxTimeMs int,
 ) (finalVerdict string, score, _ int, subtaskResults []subtaskScoreResult) {
 	groups := []int{}
-	for g := range groupResults {
+	for g := range groupScores {
 		groups = append(groups, g)
 	}
 	sort.Ints(groups)
@@ -319,41 +452,61 @@ func scoreIOIGroupEqual(
 		return "IE", 0, maxTimeMs, nil
 	}
 
-	// No group structure — all or nothing
+	// No group structure (all TCs in group 0) — single pool with SumAggregator.
 	if len(groups) == 1 && groups[0] == 0 {
-		for _, v := range groupResults[0] {
-			if v != "AC" {
-				return v, 0, maxTimeMs, nil
-			}
+		pts := sumGroupScore(groupScores[0], 100)
+		if pts >= 100 {
+			return "AC", 100, maxTimeMs, nil
 		}
-		return "AC", 100, maxTimeMs, nil
+		return "WA", int(math.Round(pts)), maxTimeMs, nil
 	}
 
 	pointsPerGroup := 100 / len(groups)
 	finalVerdict = "AC"
 	for i, g := range groups {
-		pts := pointsPerGroup
+		maxPts := pointsPerGroup
 		if i == len(groups)-1 {
-			pts = 100 - pointsPerGroup*(len(groups)-1)
+			maxPts = 100 - pointsPerGroup*(len(groups)-1)
 		}
-		groupAC := true
-		for _, v := range groupResults[g] {
-			if v != "AC" {
-				groupAC = false
-			}
-		}
-		s, verdict := 0, "WA"
-		if groupAC {
-			s = pts
+		pts := sumGroupScore(groupScores[g], float64(maxPts))
+		earned := int(math.Round(pts))
+		verdict := "WA"
+		if earned >= maxPts {
 			verdict = "AC"
 		} else {
 			finalVerdict = "WA"
 		}
+		score += earned
 		subtaskResults = append(subtaskResults, subtaskScoreResult{
-			subtaskNum: g, verdict: verdict, score: s, maxScore: pts,
+			subtaskNum: g, verdict: verdict, score: earned, maxScore: maxPts,
 		})
 	}
 	return
+}
+
+// sumGroupScore applies SumAggregator over the TCs in one group.
+// tcShare = groupMax / len(tcs); each AC earns tcShare; OK <pts> earns pts absolute;
+// OK <pct>% earns pct * tcShare / 100.
+func sumGroupScore(tcs []tcScore, groupMax float64) float64 {
+	n := float64(len(tcs))
+	if n == 0 {
+		return groupMax
+	}
+	tcShare := groupMax / n
+	total := 0.0
+	for _, tc := range tcs {
+		switch tc.verdict {
+		case "AC":
+			total += tcShare
+		case "OK":
+			if tc.isPct {
+				total += tc.pct * tcShare / 100.0
+			} else {
+				total += tc.absPoints
+			}
+		}
+	}
+	return total
 }
 
 func compile(lang, code, dir string) (string, error) {
@@ -384,14 +537,10 @@ func compile(lang, code, dir string) (string, error) {
 	}
 }
 
-func runCase(lang, binPath, inFile, outFile string, timeLimitSec int) (verdict string, timeMs int) {
-	expected, err := os.ReadFile(outFile)
-	if err != nil {
-		return "IE", 0
-	}
+func runCase(lang, binPath, inFile, outFile, scorerPath, workDir string, timeLimitSec int) (ts tcScore, timeMs int) {
 	input, err := os.ReadFile(inFile)
 	if err != nil {
-		return "IE", 0
+		return tcScore{verdict: "IE"}, 0
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(),
@@ -405,7 +554,7 @@ func runCase(lang, binPath, inFile, outFile string, timeLimitSec int) (verdict s
 	case "python3":
 		cmd = exec.CommandContext(ctx, "python3", binPath)
 	default:
-		return "IE", 0
+		return tcScore{verdict: "IE"}, 0
 	}
 
 	var stdout bytes.Buffer
@@ -417,15 +566,101 @@ func runCase(lang, binPath, inFile, outFile string, timeLimitSec int) (verdict s
 	elapsed := int(time.Since(start).Milliseconds())
 
 	if ctx.Err() == context.DeadlineExceeded {
-		return "TLE", elapsed
+		return tcScore{verdict: "TLE"}, elapsed
 	}
 	if err != nil {
-		return "RTE", elapsed
+		return tcScore{verdict: "RTE"}, elapsed
 	}
-	if normalize(stdout.String()) == normalize(string(expected)) {
-		return "AC", elapsed
+
+	if scorerPath == "" {
+		// Default diff comparison
+		expected, err := os.ReadFile(outFile)
+		if err != nil {
+			return tcScore{verdict: "IE"}, elapsed
+		}
+		if normalize(stdout.String()) == normalize(string(expected)) {
+			return tcScore{verdict: "AC"}, elapsed
+		}
+		return tcScore{verdict: "WA"}, elapsed
 	}
-	return "WA", elapsed
+
+	// Custom scorer: write contestant output to temp file, invoke scorer.
+	// Protocol: ./scorer <input> <expected_output> <contestant_output>
+	// Scorer writes verdict to stdout (tcframe two-line format).
+	contestantOut := filepath.Join(workDir, "contestant.out")
+	if err := os.WriteFile(contestantOut, stdout.Bytes(), 0644); err != nil {
+		return tcScore{verdict: "IE"}, elapsed
+	}
+
+	scorerCtx, scorerCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer scorerCancel()
+
+	var scorerStdout bytes.Buffer
+	scorerCmd := exec.CommandContext(scorerCtx, scorerPath, inFile, outFile, contestantOut)
+	scorerCmd.Stdout = &scorerStdout
+	scorerCmd.Run() // verdict is in stdout regardless of exit code
+
+	return parseCheckerVerdict(scorerStdout.String()), elapsed
+}
+
+// runCaseInteractive connects the solution and communicator via a named pipe.
+// Protocol (from tcframe CommunicatorEvaluator):
+//
+//	mkfifo pipe
+//	./communicator <input> < pipe | ./solution > pipe
+//
+// The communicator writes its verdict to stderr (tcframe two-line format).
+func runCaseInteractive(lang, binPath, inFile, communicatorPath, workDir string, timeLimitSec int) (ts tcScore, timeMs int) {
+	pipePath := filepath.Join(workDir, "comm.pipe")
+	commErrPath := filepath.Join(workDir, "comm.stderr")
+
+	var innerCmd string
+	switch lang {
+	case "cpp17", "cpp20":
+		innerCmd = fmt.Sprintf(`ulimit -s unlimited && "%s"`, binPath)
+	case "python3":
+		innerCmd = fmt.Sprintf(`python3 "%s"`, binPath)
+	default:
+		return tcScore{verdict: "IE"}, 0
+	}
+
+	// Write a shell script: both processes run concurrently via a named FIFO.
+	// SIGPIPE on the solution side (communicator closed pipe) is normal; the
+	// pipeline exit status is unreliable — we use communicator stderr for verdict.
+	scriptPath := filepath.Join(workDir, "interactive.sh")
+	script := fmt.Sprintf(`#!/bin/sh
+PIPE="%s"
+rm -f "$PIPE"
+mkfifo "$PIPE"
+"%s" "%s" < "$PIPE" 2>"%s" | /bin/sh -c '%s' > "$PIPE"
+EXIT=$?
+rm -f "$PIPE"
+exit $EXIT
+`, pipePath, communicatorPath, inFile, commErrPath, innerCmd)
+
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		return tcScore{verdict: "IE"}, 0
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(),
+		time.Duration(timeLimitSec)*time.Second+500*time.Millisecond)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "/bin/sh", scriptPath)
+	start := time.Now()
+	cmd.Run() // exit code unreliable for pipe setups; use communicator stderr
+	elapsed := int(time.Since(start).Milliseconds())
+
+	if ctx.Err() == context.DeadlineExceeded {
+		return tcScore{verdict: "TLE"}, elapsed
+	}
+
+	commErrContent, _ := os.ReadFile(commErrPath)
+	if strings.TrimSpace(string(commErrContent)) == "" {
+		return tcScore{verdict: "RTE"}, elapsed
+	}
+
+	return parseCheckerVerdict(string(commErrContent)), elapsed
 }
 
 func normalize(s string) string {

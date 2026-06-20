@@ -117,22 +117,23 @@ func GetSubmission(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vrows, _ := db.DB.Query(
-		"SELECT test_case, verdict, time_ms, memory_kb, group_num FROM verdicts WHERE submission_id = ? ORDER BY group_num, test_case",
+		"SELECT test_case, verdict, time_ms, memory_kb, group_num, points_fraction FROM verdicts WHERE submission_id = ? ORDER BY group_num, test_case",
 		id,
 	)
 	defer vrows.Close()
 
 	type v struct {
-		TestCase string `json:"test_case"`
-		Verdict  string `json:"verdict"`
-		TimeMs   int    `json:"time_ms"`
-		MemoryKB int    `json:"memory_kb"`
-		GroupNum int    `json:"group_num"`
+		TestCase       string  `json:"test_case"`
+		Verdict        string  `json:"verdict"`
+		TimeMs         int     `json:"time_ms"`
+		MemoryKB       int     `json:"memory_kb"`
+		GroupNum       int     `json:"group_num"`
+		PointsFraction float64 `json:"points_fraction"`
 	}
 	var verdicts []v
 	for vrows.Next() {
 		var vv v
-		vrows.Scan(&vv.TestCase, &vv.Verdict, &vv.TimeMs, &vv.MemoryKB, &vv.GroupNum)
+		vrows.Scan(&vv.TestCase, &vv.Verdict, &vv.TimeMs, &vv.MemoryKB, &vv.GroupNum, &vv.PointsFraction)
 		verdicts = append(verdicts, vv)
 	}
 
