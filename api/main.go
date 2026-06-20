@@ -24,6 +24,7 @@ func main() {
 		log.Fatalf("db seed: %v", err)
 	}
 
+	handler.InitJWT()
 	handler.SetContestDir(contestDir)
 
 	jsonMW := func(next http.Handler) http.Handler {

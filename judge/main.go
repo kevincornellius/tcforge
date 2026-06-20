@@ -18,8 +18,28 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/lib/pq"
 	_ "modernc.org/sqlite"
 )
+
+var judgeIsPostgres bool
+
+func rebind(q string) string {
+	if !judgeIsPostgres {
+		return q
+	}
+	n := 0
+	var b strings.Builder
+	for _, r := range q {
+		if r == '?' {
+			n++
+			fmt.Fprintf(&b, "$%d", n)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
 
 func main() {
 	contestDir := os.Getenv("TCFORGE_CONTEST_DIR")
@@ -27,19 +47,38 @@ func main() {
 		contestDir = "/contest"
 	}
 
-	dbPath := filepath.Join(contestDir, ".tcforge", "db.sqlite")
-
 	var db *sql.DB
-	for {
+	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+		judgeIsPostgres = true
 		var err error
-		db, err = sql.Open("sqlite", dbPath+"?_busy_timeout=5000")
-		if err == nil {
-			if _, err = db.Exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;"); err == nil {
-				break
+		for {
+			db, err = sql.Open("postgres", dbURL)
+			if err == nil {
+				if err = db.Ping(); err == nil {
+					break
+				}
 			}
+			log.Println("waiting for db:", err)
+			time.Sleep(2 * time.Second)
 		}
-		log.Println("waiting for db:", err)
-		time.Sleep(2 * time.Second)
+		log.Println("judge: using postgres")
+	} else {
+		dbPath := os.Getenv("TCFORGE_DB_PATH")
+		if dbPath == "" {
+			dbPath = filepath.Join(contestDir, ".tcforge", "db.sqlite")
+		}
+		for {
+			var err error
+			db, err = sql.Open("sqlite", dbPath+"?_busy_timeout=5000")
+			if err == nil {
+				if _, err = db.Exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;"); err == nil {
+					break
+				}
+			}
+			log.Println("waiting for db:", err)
+			time.Sleep(2 * time.Second)
+		}
+		log.Println("judge: using sqlite at", dbPath)
 	}
 	defer db.Close()
 
@@ -127,17 +166,17 @@ func processNext(db *sql.DB, contestDir string) (retErr error) {
 	}
 
 	log.Printf("judging submission %d (problem=%s lang=%s)", sub.ID, sub.ProblemPath, sub.Language)
-	db.Exec("UPDATE submissions SET status='judging' WHERE id=?", sub.ID)
+	db.Exec(rebind("UPDATE submissions SET status='judging' WHERE id=?"), sub.ID)
 
 	scoring := contestScoring(contestDir)
 	finalVerdict, score, maxTimeMs, subtaskResults := judge(db, sub, contestDir, scoring)
 
-	db.Exec("UPDATE submissions SET status='done', verdict=?, score=?, time_ms=?, graded_at=CURRENT_TIMESTAMP WHERE id=?",
+	db.Exec(rebind("UPDATE submissions SET status='done', verdict=?, score=?, time_ms=?, graded_at=CURRENT_TIMESTAMP WHERE id=?"),
 		finalVerdict, score, maxTimeMs, sub.ID)
 
 	for _, s := range subtaskResults {
-		db.Exec(`INSERT INTO subtask_scores (submission_id, subtask_num, verdict, score, max_score)
-			VALUES (?,?,?,?,?)`,
+		db.Exec(rebind(`INSERT INTO subtask_scores (submission_id, subtask_num, verdict, score, max_score)
+			VALUES (?,?,?,?,?)`),
 			sub.ID, s.subtaskNum, s.verdict, s.score, s.maxScore)
 	}
 
@@ -214,8 +253,8 @@ func parseGroupNum(base string) int {
 }
 
 func writeVerdict(db *sql.DB, subID int, tc tcVerdict) {
-	db.Exec(`INSERT INTO verdicts (submission_id, test_case, verdict, time_ms, memory_kb, group_num, points_fraction)
-		VALUES (?,?,?,?,?,?,?)`,
+	db.Exec(rebind(`INSERT INTO verdicts (submission_id, test_case, verdict, time_ms, memory_kb, group_num, points_fraction)
+		VALUES (?,?,?,?,?,?,?)`),
 		subID, tc.testCase, tc.verdict, tc.timeMs, tc.memKb, tc.groupNum, tc.pointsFraction)
 }
 

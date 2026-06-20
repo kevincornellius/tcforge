@@ -13,33 +13,32 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var deployImageFlag string
-var deployPushFlag bool
 var deployBaseTag string
-var deployEmit bool
+var deployFly bool
+var deployLocal bool
+var deployPush bool
+var deployImageFlag string
 
 var deployCmd = &cobra.Command{
 	Use:   "deploy",
-	Short: "Bake the contest into a single Docker image for cloud deployment",
-	Long: `Packages the contest with the tcforge API and judge into a deployable Docker image.
+	Short: "Generate deploy files for cloud deployment",
+	Long: `Writes Dockerfile, entrypoint.sh, fly.toml, and .dockerignore to the current directory.
 
-Build locally (requires 'tcforge build' first):
-  tcforge deploy                  # builds tcforge-<contest>:latest
-  tcforge deploy --push           # build + push to registry
-  tcforge deploy --image ghcr.io/you/c:v1 --push
+  tcforge deploy           # emit files + print instructions
+  tcforge deploy --push    # emit + build + push to GHCR (auto-detects image from git remote)
+  tcforge deploy --fly     # emit + deploy to Fly.io automatically
+  tcforge deploy --local   # build image locally for testing
 
-Emit a Dockerfile for repo-based deployment (Koyeb/Railway "deploy from GitHub"):
-  tcforge deploy --emit           # writes Dockerfile + entrypoint.sh
-  Commit those files and link your repo on Koyeb/Railway/Render.
-  Docker will run tcforge build automatically during image build.`,
+Docs: https://github.com/kevincornellius/tcforge/blob/main/docs/deploy.md`,
 	RunE: runDeploy,
 }
 
 func init() {
-	deployCmd.Flags().StringVar(&deployImageFlag, "image", "", "Image name:tag to build (default: tcforge-<contest>:latest)")
-	deployCmd.Flags().BoolVar(&deployPushFlag, "push", false, "Push image to registry after building")
 	deployCmd.Flags().StringVar(&deployBaseTag, "base", "latest", "tcforge base image tag to source binaries from")
-	deployCmd.Flags().BoolVar(&deployEmit, "emit", false, "Write Dockerfile + entrypoint.sh to the current directory for repo-based deployment")
+	deployCmd.Flags().BoolVar(&deployFly, "fly", false, "Deploy to Fly.io after emitting files")
+	deployCmd.Flags().BoolVar(&deployLocal, "local", false, "Build image locally with Docker")
+	deployCmd.Flags().BoolVar(&deployPush, "push", false, "Build and push image to GHCR (auto-detects from git remote)")
+	deployCmd.Flags().StringVar(&deployImageFlag, "image", "", "Override image name for --push or --local (default: auto-detected)")
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
@@ -53,10 +52,121 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("could not load tcforge.yaml: %w\nRun 'tcforge init' first", err)
 	}
 
-	if deployEmit {
-		return emitRepoMode(cfg, cwd, deployBaseTag)
+	if deployLocal {
+		return localDockerBuild(cfg, cwd)
 	}
 
+	if deployPush {
+		return ghcrPush(cfg, cwd)
+	}
+
+	if err := emitRepoMode(cfg, cwd, deployBaseTag); err != nil {
+		return err
+	}
+	if deployFly {
+		return flyDeploy(cwd, cfg)
+	}
+	return nil
+}
+
+func ghcrPush(cfg *config.Config, cwd string) error {
+	image := deployImageFlag
+	if image == "" {
+		user := githubUserFromRemote(cwd)
+		if user == "" {
+			return fmt.Errorf("could not detect GitHub username from git remote\nSet it explicitly: tcforge deploy --push --image ghcr.io/you/%s:latest", sanitizeImageName(cfg.Contest.Name))
+		}
+		image = fmt.Sprintf("ghcr.io/%s/%s:latest", user, sanitizeImageName(cfg.Contest.Name))
+	}
+
+	if err := emitRepoMode(cfg, cwd, deployBaseTag); err != nil {
+		return err
+	}
+
+	if err := docker.CheckRunning(); err != nil {
+		return err
+	}
+
+	fmt.Printf("→ Building %s (linux/amd64)...\n", image)
+	buildCmd := exec.Command("docker", "build", "--platform", "linux/amd64", "-t", image, cwd)
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		return fmt.Errorf("docker build failed: %w", err)
+	}
+
+	fmt.Printf("→ Pushing %s...\n", image)
+	pushCmd := exec.Command("docker", "push", image)
+	pushCmd.Stdout = os.Stdout
+	pushCmd.Stderr = os.Stderr
+	if err := pushCmd.Run(); err != nil {
+		return fmt.Errorf("docker push failed (run 'docker login ghcr.io' first): %w", err)
+	}
+
+	fmt.Printf("\n✓ Image pushed: %s\n", image)
+	fmt.Printf("\nDeploy on any platform using image: %s\n", image)
+	fmt.Printf("Port: 8080 | Add persistent disk at /data for data persistence\n")
+	fmt.Printf("\nDocs: https://github.com/kevincornellius/tcforge/blob/main/docs/deploy.md\n")
+	return nil
+}
+
+func githubUserFromRemote(cwd string) string {
+	out, err := exec.Command("git", "-C", cwd, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return ""
+	}
+	url := strings.TrimSpace(string(out))
+	// https://github.com/user/repo or git@github.com:user/repo
+	for _, prefix := range []string{"https://github.com/", "git@github.com:"} {
+		if strings.HasPrefix(url, prefix) {
+			parts := strings.SplitN(strings.TrimPrefix(url, prefix), "/", 2)
+			if len(parts) >= 1 {
+				return strings.ToLower(parts[0])
+			}
+		}
+	}
+	return ""
+}
+
+func flyDeploy(cwd string, cfg *config.Config) error {
+	if _, err := exec.LookPath("fly"); err != nil {
+		fmt.Println()
+		fmt.Println("fly CLI not found. Install it and authenticate, then run 'tcforge deploy' again:")
+		fmt.Println("  curl -L https://fly.io/install.sh | sh")
+		fmt.Println("  fly auth login")
+		return nil
+	}
+
+	appName := sanitizeImageName(cfg.Contest.Name)
+
+	// Check if app exists; if not, run fly launch to create it + provision volume
+	check := exec.Command("fly", "status", "-a", appName)
+	check.Dir = cwd
+	if err := check.Run(); err != nil {
+		fmt.Printf("→ Creating Fly app %q...\n", appName)
+		launch := exec.Command("fly", "launch", "--no-deploy", "--name", appName, "--copy-config")
+		launch.Dir = cwd
+		launch.Stdout = os.Stdout
+		launch.Stderr = os.Stderr
+		if err := launch.Run(); err != nil {
+			return fmt.Errorf("fly launch failed: %w", err)
+		}
+	}
+
+	fmt.Println("→ Deploying to Fly.io...")
+	deploy := exec.Command("fly", "deploy", "-a", appName)
+	deploy.Dir = cwd
+	deploy.Stdout = os.Stdout
+	deploy.Stderr = os.Stderr
+	if err := deploy.Run(); err != nil {
+		return fmt.Errorf("fly deploy failed: %w", err)
+	}
+
+	fmt.Printf("\n✓ Live at https://%s.fly.dev\n", appName)
+	return nil
+}
+
+func localDockerBuild(cfg *config.Config, cwd string) error {
 	fmt.Println("→ Checking test cases...")
 	for _, p := range cfg.Problems {
 		tcDir := filepath.Join(cwd, p.Path, "tc")
@@ -73,8 +183,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	image := deployImageFlag
 	if image == "" {
-		name := sanitizeImageName(cfg.Contest.Name)
-		image = "tcforge-" + name + ":latest"
+		image = "tcforge-" + sanitizeImageName(cfg.Contest.Name) + ":latest"
 	}
 
 	tmpDir, err := os.MkdirTemp("", "tcforge-deploy-*")
@@ -84,50 +193,26 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	defer os.RemoveAll(tmpDir)
 
 	fmt.Println("→ Preparing build context...")
-
-	contestDst := filepath.Join(tmpDir, "contest")
-	if err := copyContest(cwd, contestDst); err != nil {
+	if err := copyContest(cwd, filepath.Join(tmpDir, "contest")); err != nil {
 		return fmt.Errorf("copying contest: %w", err)
 	}
-
-	entrypoint := "#!/bin/sh\n/bin/judge &\nexec /bin/api\n"
-	if err := os.WriteFile(filepath.Join(tmpDir, "entrypoint.sh"), []byte(entrypoint), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "entrypoint.sh"), []byte(deployEntrypoint()), 0755); err != nil {
 		return err
 	}
-
 	if err := os.WriteFile(filepath.Join(tmpDir, "Dockerfile"), []byte(buildDeployDockerfile(deployBaseTag)), 0644); err != nil {
 		return err
 	}
 
 	fmt.Printf("→ Building image %s (linux/amd64)...\n", image)
-	buildArgs := []string{
-		"build",
-		"--platform", "linux/amd64",
-		"-t", image,
-		"--build-arg", "BASE_TAG=" + deployBaseTag,
-		tmpDir,
-	}
-	buildCmd := exec.Command("docker", buildArgs...)
+	buildCmd := exec.Command("docker", "build", "--platform", "linux/amd64", "-t", image, "--build-arg", "BASE_TAG="+deployBaseTag, tmpDir)
 	buildCmd.Stdout = os.Stdout
 	buildCmd.Stderr = os.Stderr
 	if err := buildCmd.Run(); err != nil {
 		return fmt.Errorf("docker build failed: %w", err)
 	}
+	fmt.Printf("✓ Image built: %s\n", image)
 
-	fmt.Printf("\n✓ Image built: %s\n", image)
-
-	if deployPushFlag {
-		fmt.Printf("→ Pushing %s...\n", image)
-		pushCmd := exec.Command("docker", "push", image)
-		pushCmd.Stdout = os.Stdout
-		pushCmd.Stderr = os.Stderr
-		if err := pushCmd.Run(); err != nil {
-			return fmt.Errorf("docker push failed: %w", err)
-		}
-		fmt.Printf("✓ Pushed: %s\n", image)
-	}
-
-	printDeployInstructions(image, deployPushFlag)
+	printDeployInstructions(image)
 	return nil
 }
 
@@ -153,9 +238,10 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV TCFORGE_CONTEST_DIR=/contest
+ENV TCFORGE_VERSION=%s
 EXPOSE 8080
 ENTRYPOINT ["/entrypoint.sh"]
-`, baseTag, registry, registry)
+`, baseTag, registry, registry, Version)
 }
 
 func sanitizeImageName(name string) string {
@@ -233,58 +319,87 @@ func copyFile(src, dst string) error {
 	return err
 }
 
-// emitRepoMode writes Dockerfile + entrypoint.sh + .dockerignore into cwd so
-// the user can commit them and link the repo on Koyeb/Railway/Render.
-// Docker will run tcframe build automatically during the image build.
+func deployEntrypoint() string {
+	return `#!/bin/sh
+# If a persistent volume is mounted at /data, store the DB there so sessions
+# and submissions survive container restarts. Otherwise use the baked-in path.
+if [ -d /data ] && [ -w /data ]; then
+    export TCFORGE_DB_PATH=/data/db.sqlite
+fi
+/bin/judge &
+exec /bin/api
+`
+}
+
+// emitRepoMode writes Dockerfile, entrypoint.sh, .dockerignore, and fly.toml
+// into cwd so the user can commit and deploy with a single `fly deploy`.
 func emitRepoMode(cfg *config.Config, cwd, baseTag string) error {
-	dockerfilePath := filepath.Join(cwd, "Dockerfile")
-	entrypointPath := filepath.Join(cwd, "entrypoint.sh")
-	ignorePath := filepath.Join(cwd, ".dockerignore")
-
-	// Warn if Dockerfile already exists
-	if _, err := os.Stat(dockerfilePath); err == nil {
-		fmt.Println("warning: Dockerfile already exists — overwriting")
+	files := map[string]struct {
+		content []byte
+		mode    os.FileMode
+	}{
+		"Dockerfile":    {[]byte(buildEmitDockerfile(cfg, baseTag)), 0644},
+		"entrypoint.sh": {[]byte(deployEntrypoint()), 0755},
+		".dockerignore": {[]byte(".git\n.tcforge\n"), 0644},
+		"fly.toml":      {[]byte(buildFlyToml(cfg)), 0644},
 	}
 
-	df := buildEmitDockerfile(cfg, baseTag)
-	if err := os.WriteFile(dockerfilePath, []byte(df), 0644); err != nil {
-		return fmt.Errorf("writing Dockerfile: %w", err)
+	for name, f := range files {
+		path := filepath.Join(cwd, name)
+		if _, err := os.Stat(path); err == nil {
+			fmt.Printf("warning: %s already exists — overwriting\n", name)
+		}
+		if err := os.WriteFile(path, f.content, f.mode); err != nil {
+			return fmt.Errorf("writing %s: %w", name, err)
+		}
+		fmt.Printf("✓ %s\n", name)
 	}
 
-	entrypoint := "#!/bin/sh\n/bin/judge &\nexec /bin/api\n"
-	if err := os.WriteFile(entrypointPath, []byte(entrypoint), 0755); err != nil {
-		return fmt.Errorf("writing entrypoint.sh: %w", err)
-	}
-
-	dockerignore := ".git\n.tcforge\n"
-	if err := os.WriteFile(ignorePath, []byte(dockerignore), 0644); err != nil {
-		return fmt.Errorf("writing .dockerignore: %w", err)
-	}
-
-	fmt.Println("✓ Dockerfile")
-	fmt.Println("✓ entrypoint.sh")
-	fmt.Println("✓ .dockerignore")
 	fmt.Printf(`
-Next steps:
-  git add Dockerfile entrypoint.sh .dockerignore
-  git commit -m "add tcforge deploy files"
-  git push
+Next steps — pick one:
 
-Then on Koyeb (koyeb.com → New Service → GitHub):
-  • Repo: your-repo   Branch: main
-  • Builder: Dockerfile
-  • Port: 8080
-  • Deploy → get your .koyeb.app URL
+  Push image to GHCR (deploy on any platform):
+    tcforge deploy --push
 
-On Railway (railway.app → New → GitHub Repo):
-  • Port: 8080  (set PORT=8080 in env or railway detects EXPOSE)
+  Deploy to Fly.io:
+    tcforge deploy --fly
 
-On Render (render.com → New Web Service → GitHub):
-  • Runtime: Docker   Port: 8080
+  Deploy from GitHub repo (Koyeb/Railway/Render):
+    git add Dockerfile entrypoint.sh .dockerignore fly.toml
+    git commit -m "deploy" && git push
+    Link repo on platform → Dockerfile | Port 8080
 
-Note: submissions are not persisted across restarts.
+Full guide: https://github.com/kevincornellius/tcforge/blob/main/docs/deploy.md
 `)
 	return nil
+}
+
+func buildFlyToml(cfg *config.Config) string {
+	appName := sanitizeImageName(cfg.Contest.Name)
+	return fmt.Sprintf(`# Generated by tcforge deploy --emit
+# Run: fly launch --no-deploy && fly deploy
+
+app = "%s"
+primary_region = "sin"
+
+[build]
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[[mounts]]
+  source = "tcforge_data"
+  destination = "/data"
+`, appName)
 }
 
 // buildEmitDockerfile generates a Dockerfile that runs tcframe build for each
@@ -330,35 +445,18 @@ func buildEmitDockerfile(cfg *config.Config, baseTag string) string {
 	b.WriteString("COPY --from=tc-builder /contest /contest\n\n")
 	b.WriteString("COPY entrypoint.sh /entrypoint.sh\n")
 	b.WriteString("RUN chmod +x /entrypoint.sh\n\n")
-	b.WriteString("ENV TCFORGE_CONTEST_DIR=/contest\n")
+	fmt.Fprintf(&b, "ENV TCFORGE_CONTEST_DIR=/contest\nENV TCFORGE_VERSION=%s\n", Version)
 	b.WriteString("EXPOSE 8080\n")
 	b.WriteString("ENTRYPOINT [\"/entrypoint.sh\"]\n")
 
 	return b.String()
 }
 
-func printDeployInstructions(image string, pushed bool) {
-	pushNote := ""
-	if !pushed {
-		pushNote = fmt.Sprintf("\nPush first:  docker push %s\n", image)
-	}
-
+func printDeployInstructions(image string) {
 	fmt.Printf(`
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Test locally:
   docker run -p 6174:8080 %s
-  open http://localhost:6174
-%s
-Deploy to Koyeb (koyeb.com → New Service → Docker):
-  Image: %s  |  Port: 8080
 
-Deploy to Railway (railway.app):
-  railway up --image %s
-
-Deploy to Render (render.com → New Web Service):
-  Deploy an existing image: %s  |  Port: 8080
-
-Note: submissions are not persisted across restarts.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-`, image, pushNote, image, image, image)
+Docs: https://github.com/kevincornellius/tcforge/blob/main/docs/deploy.md
+`, image)
 }

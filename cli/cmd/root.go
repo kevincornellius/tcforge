@@ -12,7 +12,11 @@ var rootCmd = &cobra.Command{
 	Short: "Local contest hosting powered by tcframe",
 }
 
+// Version is the CLI version set at build time, accessible to all commands.
+var Version = "dev"
+
 func Execute(version string) {
+	Version = version
 	rootCmd.Version = version
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

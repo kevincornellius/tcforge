@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/kevincornellius/tcforge/api/internal/db"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type contextKey string
@@ -75,17 +75,21 @@ func tokenFromRequest(r *http.Request) string {
 	return ""
 }
 
-func userByToken(token string) (*User, error) {
-	u := &User{}
-	var isAdmin int
-	err := db.DB.QueryRow(`
-		SELECT u.id, u.username, u.display_name, u.is_admin
-		FROM sessions s JOIN users u ON s.user_id = u.id
-		WHERE s.token = ?`, token,
-	).Scan(&u.ID, &u.Username, &u.DisplayName, &isAdmin)
+func userByToken(tokenStr string) (*User, error) {
+	c := &claims{}
+	_, err := jwt.ParseWithClaims(tokenStr, c, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return jwtSecret, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	u.IsAdmin = isAdmin == 1
-	return u, nil
+	return &User{
+		ID:          c.UserID,
+		Username:    c.Subject,
+		DisplayName: c.DisplayName,
+		IsAdmin:     c.IsAdmin,
+	}, nil
 }
