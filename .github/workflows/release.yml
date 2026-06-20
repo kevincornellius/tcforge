@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build web
+        run: cd web && npm install && npm run build
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker images
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          docker build -t ghcr.io/kevincornellius/tcforge-builder:$TAG -t ghcr.io/kevincornellius/tcforge-builder:latest ./docker/builder
+          docker build -t ghcr.io/kevincornellius/tcforge-api:$TAG    -t ghcr.io/kevincornellius/tcforge-api:latest    -f api/Dockerfile .
+          docker build -t ghcr.io/kevincornellius/tcforge-judge:$TAG  -t ghcr.io/kevincornellius/tcforge-judge:latest  -f judge/Dockerfile .
+          docker push ghcr.io/kevincornellius/tcforge-builder:$TAG
+          docker push ghcr.io/kevincornellius/tcforge-builder:latest
+          docker push ghcr.io/kevincornellius/tcforge-api:$TAG
+          docker push ghcr.io/kevincornellius/tcforge-api:latest
+          docker push ghcr.io/kevincornellius/tcforge-judge:$TAG
+          docker push ghcr.io/kevincornellius/tcforge-judge:latest
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

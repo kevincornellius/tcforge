@@ -2,7 +2,7 @@
 set -e
 
 REGISTRY="ghcr.io/kevincornellius"
-TAG="${1:-latest}"
+TAG="${1:-dev}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$SCRIPT_DIR/.."
 
