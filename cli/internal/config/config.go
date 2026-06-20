@@ -10,6 +10,7 @@ import (
 type Contest struct {
 	Name     string `yaml:"name"`
 	Duration string `yaml:"duration"`
+	Scoring  string `yaml:"scoring"` // "ioi" (default) or "icpc"
 }
 
 type Problem struct {

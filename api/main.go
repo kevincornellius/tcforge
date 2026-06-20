@@ -59,8 +59,9 @@ func main() {
 		r.Get("/api/scoreboard", handler.GetScoreboard)
 	})
 
-	// Public asset serving (images referenced in problem statements)
+	// Public — asset serving and subtask config
 	r.Get("/api/problems/{slug}/assets/*", handler.ServeAsset)
+	r.With(jsonMW).Get("/api/problems/{slug}/subtasks", handler.GetSubtasks)
 
 	// Admin routes (auth + admin required)
 	r.Group(func(r chi.Router) {

@@ -66,6 +66,36 @@ func GetProblem(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetSubtasks returns the subtask structure from config.json if present.
+func GetSubtasks(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "slug")
+
+	var problemPath string
+	if err := db.DB.QueryRow("SELECT path FROM problems WHERE slug = ?", slug).Scan(&problemPath); err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	type subtaskConfig struct {
+		TestGroups [][]int `json:"test_groups"`
+		Points     []int   `json:"points"`
+	}
+
+	data, err := os.ReadFile(filepath.Join(contestDir, problemPath, "config.json"))
+	if err != nil {
+		// No config — return empty structure
+		json.NewEncoder(w).Encode(subtaskConfig{})
+		return
+	}
+
+	var cfg subtaskConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		json.NewEncoder(w).Encode(subtaskConfig{})
+		return
+	}
+	json.NewEncoder(w).Encode(cfg)
+}
+
 // ServeAsset serves static files (images, etc.) from a problem's directory.
 func ServeAsset(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")

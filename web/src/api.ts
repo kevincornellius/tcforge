@@ -42,9 +42,12 @@ export const api = {
     req<{ id: number }>("POST", "/submissions", { problem_slug, language, code }),
 
   submission: (id: number) =>
-    req<{ submission: Submission; verdicts: Verdict[] }>("GET", `/submissions/${id}`),
+    req<{ submission: Submission; verdicts: Verdict[]; subtask_scores: SubtaskScore[] }>("GET", `/submissions/${id}`),
 
   scoreboard: () => req<ScoreboardEntry[]>("GET", "/scoreboard"),
+
+  subtasks: (slug: string) =>
+    req<{ test_groups: number[][]; points: number[] }>("GET", `/problems/${slug}/subtasks`),
 
   admin: {
     users: () => req<AdminUser[]>("GET", "/admin/users"),
@@ -82,6 +85,14 @@ export interface Verdict {
   verdict: string
   time_ms: number
   memory_kb: number
+  group_num: number
+}
+
+export interface SubtaskScore {
+  subtask_num: number
+  verdict: string
+  score: number
+  max_score: number
 }
 
 export interface AdminUser {

@@ -76,8 +76,31 @@ func migrate() error {
 		test_case     TEXT NOT NULL,
 		verdict       TEXT NOT NULL,
 		time_ms       INTEGER NOT NULL DEFAULT 0,
-		memory_kb     INTEGER NOT NULL DEFAULT 0
+		memory_kb     INTEGER NOT NULL DEFAULT 0,
+		group_num     INTEGER NOT NULL DEFAULT 0
+	);
+
+	CREATE TABLE IF NOT EXISTS subtask_scores (
+		id            INTEGER PRIMARY KEY AUTOINCREMENT,
+		submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+		subtask_num   INTEGER NOT NULL,
+		verdict       TEXT NOT NULL DEFAULT '',
+		score         INTEGER NOT NULL DEFAULT 0,
+		max_score     INTEGER NOT NULL DEFAULT 0
 	);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+	// Migrate existing DBs — ignore errors if columns/tables already exist
+	DB.Exec("ALTER TABLE verdicts ADD COLUMN group_num INTEGER NOT NULL DEFAULT 0")
+	DB.Exec(`CREATE TABLE IF NOT EXISTS subtask_scores (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+		subtask_num INTEGER NOT NULL,
+		verdict TEXT NOT NULL DEFAULT '',
+		score INTEGER NOT NULL DEFAULT 0,
+		max_score INTEGER NOT NULL DEFAULT 0
+	)`)
+	return nil
 }

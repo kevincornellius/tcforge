@@ -105,27 +105,48 @@ func GetSubmission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, _ := db.DB.Query(
-		"SELECT test_case, verdict, time_ms, memory_kb FROM verdicts WHERE submission_id = ? ORDER BY test_case",
+	vrows, _ := db.DB.Query(
+		"SELECT test_case, verdict, time_ms, memory_kb, group_num FROM verdicts WHERE submission_id = ? ORDER BY group_num, test_case",
 		id,
 	)
-	defer rows.Close()
+	defer vrows.Close()
 
 	type v struct {
 		TestCase string `json:"test_case"`
 		Verdict  string `json:"verdict"`
 		TimeMs   int    `json:"time_ms"`
 		MemoryKB int    `json:"memory_kb"`
+		GroupNum int    `json:"group_num"`
 	}
 	var verdicts []v
-	for rows.Next() {
+	for vrows.Next() {
 		var vv v
-		rows.Scan(&vv.TestCase, &vv.Verdict, &vv.TimeMs, &vv.MemoryKB)
+		vrows.Scan(&vv.TestCase, &vv.Verdict, &vv.TimeMs, &vv.MemoryKB, &vv.GroupNum)
 		verdicts = append(verdicts, vv)
 	}
 
+	srows, _ := db.DB.Query(
+		"SELECT subtask_num, verdict, score, max_score FROM subtask_scores WHERE submission_id = ? ORDER BY subtask_num",
+		id,
+	)
+	defer srows.Close()
+
+	type ss struct {
+		SubtaskNum int    `json:"subtask_num"`
+		Verdict    string `json:"verdict"`
+		Score      int    `json:"score"`
+		MaxScore   int    `json:"max_score"`
+	}
+	var subtaskScores []ss
+	for srows.Next() {
+		var s ss
+		srows.Scan(&s.SubtaskNum, &s.Verdict, &s.Score, &s.MaxScore)
+		subtaskScores = append(subtaskScores, s)
+	}
+
 	json.NewEncoder(w).Encode(map[string]any{
-		"submission": sub,
-		"verdicts":   verdicts,
+		"submission":     sub,
+		"verdicts":       verdicts,
+		"subtask_scores": subtaskScores,
 	})
 }
