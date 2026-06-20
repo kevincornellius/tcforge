@@ -18,6 +18,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     body: body ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) throw new Error(await res.text())
+  if (res.status === 204) return undefined as T
   return res.json()
 }
 
@@ -31,10 +32,16 @@ export const api = {
 
   logout: () => req("POST", "/auth/logout"),
 
+  contest: () => req<ContestState>("GET", "/contest"),
+
   problems: () => req<Problem[]>("GET", "/problems"),
 
-  problem: (slug: string) =>
-    req<{ problem: Problem; statement: string }>("GET", `/problems/${slug}`),
+  problem: (slug: string, lang?: string) =>
+    req<{ problem: Problem; statement: string; available_langs: StatementMeta[] }>(
+      "GET", `/problems/${slug}${lang ? `?lang=${lang}` : ""}`
+    ),
+
+  problemStatements: (slug: string) => req<StatementMeta[]>("GET", `/problems/${slug}/statements`),
 
   submissions: () => req<Submission[]>("GET", "/submissions"),
 
@@ -49,14 +56,65 @@ export const api = {
   subtasks: (slug: string) =>
     req<{ test_groups: number[][]; points: number[] }>("GET", `/problems/${slug}/subtasks`),
 
+  announcements: () => req<Announcement[]>("GET", "/announcements"),
+
   admin: {
+    // Users
     users: () => req<AdminUser[]>("GET", "/admin/users"),
     createUser: (username: string, password: string, display_name: string, is_admin: boolean) =>
       req<{ id: number }>("POST", "/admin/users", { username, password, display_name, is_admin }),
     deleteUser: (id: number) => req("DELETE", `/admin/users/${id}`),
     resetPassword: (id: number, password: string) =>
       req("PUT", `/admin/users/${id}/password`, { password }),
+
+    // Contest settings
+    updateContest: (data: { name: string; duration: string; scoring: string }) =>
+      req("PUT", "/admin/contest", data),
+    startContest: () => req("POST", "/admin/contest/start"),
+    stopContest: () => req("POST", "/admin/contest/stop"),
+    resetContest: () => req("POST", "/admin/contest/reset"),
+
+    // Announcements
+    createAnnouncement: (message: string) =>
+      req<{ id: number }>("POST", "/admin/announcements", { message }),
+    deleteAnnouncement: (id: number) => req("DELETE", `/admin/announcements/${id}`),
+
+    // Submissions
+    submissions: () => req<AdminSubmission[]>("GET", "/admin/submissions"),
+    rejudge: (id: number) => req("POST", `/admin/submissions/${id}/rejudge`),
+
+    // Problems
+    updateProblem: (id: number, data: { title: string; time_limit: number; memory_limit: number }) =>
+      req("PUT", `/admin/problems/${id}`, data),
+    uploadStatement: (problemId: number, language: string, file: File): Promise<void> => {
+      const form = new FormData()
+      form.append("language", language)
+      form.append("file", file)
+      return fetch(`${BASE}/admin/problems/${problemId}/statements`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token()}` },
+        body: form,
+      }).then(async res => {
+        if (!res.ok) throw new Error(await res.text())
+      })
+    },
+    deleteStatement: (problemId: number, stmtId: number) =>
+      req("DELETE", `/admin/problems/${problemId}/statements/${stmtId}`),
   },
+}
+
+export interface ContestState {
+  name: string
+  duration: string
+  scoring: string
+  start_at: string | null
+  end_at: string | null
+}
+
+export interface StatementMeta {
+  language: string
+  label: string
+  format: string
 }
 
 export interface Problem {
@@ -100,6 +158,24 @@ export interface AdminUser {
   username: string
   display_name: string
   is_admin: boolean
+}
+
+export interface AdminSubmission {
+  id: number
+  username: string
+  problem_slug: string
+  problem_title: string
+  language: string
+  status: string
+  verdict: string
+  score: number
+  submitted_at: string
+}
+
+export interface Announcement {
+  id: number
+  message: string
+  created_at: string
 }
 
 export interface ScoreboardEntry {

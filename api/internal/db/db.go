@@ -88,6 +88,31 @@ func migrate() error {
 		score         INTEGER NOT NULL DEFAULT 0,
 		max_score     INTEGER NOT NULL DEFAULT 0
 	);
+
+	CREATE TABLE IF NOT EXISTS contest_state (
+		id       INTEGER PRIMARY KEY CHECK (id = 1),
+		name     TEXT NOT NULL DEFAULT '',
+		duration TEXT NOT NULL DEFAULT '',
+		scoring  TEXT NOT NULL DEFAULT 'ioi',
+		start_at TEXT,
+		end_at   TEXT
+	);
+	INSERT OR IGNORE INTO contest_state (id, name, duration, scoring) VALUES (1, '', '', 'ioi');
+
+	CREATE TABLE IF NOT EXISTS announcements (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		message    TEXT NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS problem_statements (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		problem_id INTEGER NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+		language   TEXT NOT NULL,
+		filename   TEXT NOT NULL,
+		format     TEXT NOT NULL,
+		UNIQUE (problem_id, language)
+	);
 	`)
 	if err != nil {
 		return err
@@ -101,6 +126,25 @@ func migrate() error {
 		verdict TEXT NOT NULL DEFAULT '',
 		score INTEGER NOT NULL DEFAULT 0,
 		max_score INTEGER NOT NULL DEFAULT 0
+	)`)
+	DB.Exec(`CREATE TABLE IF NOT EXISTS contest_state (
+		id INTEGER PRIMARY KEY CHECK (id = 1),
+		name TEXT NOT NULL DEFAULT '',
+		duration TEXT NOT NULL DEFAULT '',
+		scoring TEXT NOT NULL DEFAULT 'ioi',
+		start_at TEXT, end_at TEXT
+	)`)
+	DB.Exec(`INSERT OR IGNORE INTO contest_state (id, name, duration, scoring) VALUES (1,'','','ioi')`)
+	DB.Exec(`CREATE TABLE IF NOT EXISTS announcements (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		message TEXT NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`)
+	DB.Exec(`CREATE TABLE IF NOT EXISTS problem_statements (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		problem_id INTEGER NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+		language TEXT NOT NULL, filename TEXT NOT NULL, format TEXT NOT NULL,
+		UNIQUE (problem_id, language)
 	)`)
 	return nil
 }

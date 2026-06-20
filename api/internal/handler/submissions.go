@@ -85,21 +85,22 @@ func GetSubmission(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
 
 	var sub struct {
-		ID          int    `json:"id"`
-		ProblemSlug string `json:"problem_slug"`
-		Language    string `json:"language"`
-		Code        string `json:"code"`
-		Status      string `json:"status"`
-		Verdict     string `json:"verdict"`
-		Score       int    `json:"score"`
-		TimeMs      int    `json:"time_ms"`
-		SubmittedAt string `json:"submitted_at"`
+		ID           int    `json:"id"`
+		ProblemSlug  string `json:"problem_slug"`
+		ProblemTitle string `json:"problem_title"`
+		Language     string `json:"language"`
+		Code         string `json:"code"`
+		Status       string `json:"status"`
+		Verdict      string `json:"verdict"`
+		Score        int    `json:"score"`
+		TimeMs       int    `json:"time_ms"`
+		SubmittedAt  string `json:"submitted_at"`
 	}
 	err := db.DB.QueryRow(`
-		SELECT s.id, p.slug, s.language, s.code, s.status, s.verdict, s.score, s.time_ms, s.submitted_at
+		SELECT s.id, p.slug, p.title, s.language, s.code, s.status, s.verdict, s.score, s.time_ms, s.submitted_at
 		FROM submissions s JOIN problems p ON s.problem_id = p.id
 		WHERE s.id = ?`, id,
-	).Scan(&sub.ID, &sub.ProblemSlug, &sub.Language, &sub.Code, &sub.Status, &sub.Verdict, &sub.Score, &sub.TimeMs, &sub.SubmittedAt)
+	).Scan(&sub.ID, &sub.ProblemSlug, &sub.ProblemTitle, &sub.Language, &sub.Code, &sub.Status, &sub.Verdict, &sub.Score, &sub.TimeMs, &sub.SubmittedAt)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return

@@ -40,6 +40,11 @@ func main() {
 	// Public
 	r.With(jsonMW).Get("/health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"ok":true}`)) })
 	r.With(jsonMW).Post("/api/auth/login", handler.Login)
+	r.With(jsonMW).Get("/api/contest", handler.GetContest)
+
+	// Public — asset serving and subtask/statement config
+	r.Get("/api/problems/{slug}/assets/*", handler.ServeAsset)
+	r.With(jsonMW).Get("/api/problems/{slug}/subtasks", handler.GetSubtasks)
 
 	// Authenticated
 	r.Group(func(r chi.Router) {
@@ -51,19 +56,17 @@ func main() {
 
 		r.Get("/api/problems", handler.ListProblems)
 		r.Get("/api/problems/{slug}", handler.GetProblem)
+		r.Get("/api/problems/{slug}/statements", handler.ListStatements)
 
 		r.Get("/api/submissions", handler.ListSubmissions)
 		r.Post("/api/submissions", handler.Submit)
 		r.Get("/api/submissions/{id}", handler.GetSubmission)
 
 		r.Get("/api/scoreboard", handler.GetScoreboard)
+		r.Get("/api/announcements", handler.ListAnnouncements)
 	})
 
-	// Public — asset serving and subtask config
-	r.Get("/api/problems/{slug}/assets/*", handler.ServeAsset)
-	r.With(jsonMW).Get("/api/problems/{slug}/subtasks", handler.GetSubtasks)
-
-	// Admin routes (auth + admin required)
+	// Admin routes — with jsonMW (JSON-only endpoints)
 	r.Group(func(r chi.Router) {
 		r.Use(handler.RequireAuth)
 		r.Use(handler.RequireAdmin)
@@ -73,6 +76,27 @@ func main() {
 		r.Post("/api/admin/users", handler.CreateUser)
 		r.Delete("/api/admin/users/{id}", handler.DeleteUser)
 		r.Put("/api/admin/users/{id}/password", handler.ResetPassword)
+
+		r.Put("/api/admin/contest", handler.UpdateContest)
+		r.Post("/api/admin/contest/start", handler.StartContest)
+		r.Post("/api/admin/contest/stop", handler.StopContest)
+		r.Post("/api/admin/contest/reset", handler.ResetContest)
+
+		r.Post("/api/admin/announcements", handler.CreateAnnouncement)
+		r.Delete("/api/admin/announcements/{id}", handler.DeleteAnnouncement)
+
+		r.Get("/api/admin/submissions", handler.ListAllSubmissions)
+		r.Post("/api/admin/submissions/{id}/rejudge", handler.RejudgeSubmission)
+
+		r.Put("/api/admin/problems/{id}", handler.UpdateProblem)
+		r.Delete("/api/admin/problems/{id}/statements/{stmtId}", handler.DeleteStatement)
+	})
+
+	// Statement upload — multipart, no jsonMW (handler sets Content-Type itself)
+	r.Group(func(r chi.Router) {
+		r.Use(handler.RequireAuth)
+		r.Use(handler.RequireAdmin)
+		r.Post("/api/admin/problems/{id}/statements", handler.UploadStatement)
 	})
 
 	// Serve pre-built React frontend (SPA fallback to index.html)

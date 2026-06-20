@@ -14,6 +14,7 @@ type contestConfig struct {
 	Contest struct {
 		Name     string `yaml:"name"`
 		Duration string `yaml:"duration"`
+		Scoring  string `yaml:"scoring"`
 	} `yaml:"contest"`
 	Problems []struct {
 		Path        string `yaml:"path"`
@@ -47,7 +48,23 @@ func Seed(contestDir string) error {
 	if err := seedProblems(cfg); err != nil {
 		return err
 	}
+	seedContestState(cfg)
 	return nil
+}
+
+func seedContestState(cfg contestConfig) {
+	var name string
+	DB.QueryRow("SELECT name FROM contest_state WHERE id=1").Scan(&name)
+	if name != "" {
+		return // already seeded from a previous run
+	}
+	scoring := cfg.Contest.Scoring
+	if scoring == "" {
+		scoring = "ioi"
+	}
+	DB.Exec("UPDATE contest_state SET name=?, duration=?, scoring=? WHERE id=1",
+		cfg.Contest.Name, cfg.Contest.Duration, scoring)
+	log.Printf("seeded contest_state: name=%q scoring=%s", cfg.Contest.Name, scoring)
 }
 
 func seedUsers(cfg contestConfig) error {
