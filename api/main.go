@@ -11,6 +11,8 @@ import (
 	"github.com/kevincornellius/tcforge/api/internal/handler"
 )
 
+var buildTime = "dev"
+
 func main() {
 	contestDir := os.Getenv("TCFORGE_CONTEST_DIR")
 	if contestDir == "" {
@@ -34,14 +36,17 @@ func main() {
 		})
 	}
 
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-
 	version := os.Getenv("TCFORGE_VERSION")
 	if version == "" {
 		version = "unknown"
 	}
+	log.Printf("tcforge-api v%s (built %s)", version, buildTime)
+
+	r := chi.NewRouter()
+	if devMode {
+		r.Use(middleware.Logger)
+	}
+	r.Use(middleware.Recoverer)
 
 	// Public
 	r.With(jsonMW).Get("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -143,6 +148,6 @@ func main() {
 		http.FileServer(http.Dir(distDir)).ServeHTTP(w, req)
 	}))
 
-	log.Println("api listening on :8080")
+	dlog("api listening on :8080")
 	log.Fatal(http.ListenAndServe(":8080", r))
 }

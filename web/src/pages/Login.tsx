@@ -26,10 +26,14 @@ export default function Login() {
 
   return (
     <div className="login-page">
-      <div className="login-box">
-        <h1>tcforge</h1>
-        <form onSubmit={onSubmit}>
+      <div className="login-card">
+        <div className="login-logo-wrap">
+          <img src="/logo_text.svg" alt="tcforge" />
+          <span className="login-sub">Contest Platform</span>
+        </div>
+        <form className="login-form" onSubmit={onSubmit}>
           <input
+            className="input-field"
             placeholder="Username"
             value={username}
             onChange={e => setUsername(e.target.value)}
@@ -37,15 +41,16 @@ export default function Login() {
             required
           />
           <input
+            className="input-field"
             type="password"
             placeholder="Password"
             value={password}
             onChange={e => setPassword(e.target.value)}
             required
           />
-          {err && <p className="error">{err}</p>}
-          <button type="submit" disabled={loading}>
-            {loading ? "Logging in…" : "Login"}
+          {err && <p className="error-msg">{err}</p>}
+          <button className="btn btn-primary btn-lg btn-full" type="submit" disabled={loading}>
+            {loading ? "Signing in…" : "Sign in"}
           </button>
         </form>
       </div>

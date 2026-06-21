@@ -210,21 +210,23 @@ func DeleteAnnouncement(w http.ResponseWriter, r *http.Request) {
 // Admin: list all submissions for rejudge view
 
 type AdminSubmission struct {
-	ID           int    `json:"id"`
-	Username     string `json:"username"`
+	ID           int     `json:"id"`
+	Username     string  `json:"username"`
 	ProblemSlug  string  `json:"problem_slug"`
 	ProblemTitle string  `json:"problem_title"`
 	Language     string  `json:"language"`
 	Status       string  `json:"status"`
 	Verdict      string  `json:"verdict"`
 	Score        int     `json:"score"`
+	TimeMs       int     `json:"time_ms"`
+	MemoryKb     int     `json:"memory_kb"`
 	SubmittedAt  string  `json:"submitted_at"`
 	GradedAt     *string `json:"graded_at"`
 }
 
 func ListAllSubmissions(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.DB.Query(`
-		SELECT s.id, u.username, p.slug, p.title, s.language, s.status, s.verdict, s.score, s.submitted_at, s.graded_at
+		SELECT s.id, u.username, p.slug, p.title, s.language, s.status, s.verdict, s.score, s.time_ms, s.memory_kb, s.submitted_at, s.graded_at
 		FROM submissions s
 		JOIN users u ON s.user_id = u.id
 		JOIN problems p ON s.problem_id = p.id
@@ -240,7 +242,7 @@ func ListAllSubmissions(w http.ResponseWriter, r *http.Request) {
 	result := []AdminSubmission{}
 	for rows.Next() {
 		var s AdminSubmission
-		rows.Scan(&s.ID, &s.Username, &s.ProblemSlug, &s.ProblemTitle, &s.Language, &s.Status, &s.Verdict, &s.Score, &s.SubmittedAt, &s.GradedAt)
+		rows.Scan(&s.ID, &s.Username, &s.ProblemSlug, &s.ProblemTitle, &s.Language, &s.Status, &s.Verdict, &s.Score, &s.TimeMs, &s.MemoryKb, &s.SubmittedAt, &s.GradedAt)
 		result = append(result, s)
 	}
 	json.NewEncoder(w).Encode(result)

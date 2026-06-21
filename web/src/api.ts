@@ -55,7 +55,7 @@ export const api = {
   submission: (id: number) =>
     req<{ submission: Submission; verdicts: Verdict[]; subtask_scores: SubtaskScore[] }>("GET", `/submissions/${id}`),
 
-  scoreboard: () => req<ScoreboardEntry[]>("GET", "/scoreboard"),
+  scoreboard: () => req<ScoreboardData>("GET", "/scoreboard"),
 
   subtasks: (slug: string) =>
     req<{ test_groups: number[][]; points: number[] }>("GET", `/problems/${slug}/subtasks`),
@@ -166,6 +166,7 @@ export interface Submission {
   verdict: string
   score: number
   time_ms: number
+  memory_kb: number
   submitted_at: string
   graded_at: string | null
 }
@@ -201,6 +202,8 @@ export interface AdminSubmission {
   status: string
   verdict: string
   score: number
+  time_ms: number
+  memory_kb: number
   submitted_at: string
   graded_at: string | null
 }
@@ -216,4 +219,10 @@ export interface ScoreboardEntry {
   display_name: string
   total_score: number
   problems: Record<string, number>
+}
+
+export interface ScoreboardData {
+  entries: ScoreboardEntry[]
+  first_solvers: Record<string, number>
+  problem_max_score: Record<string, number>
 }

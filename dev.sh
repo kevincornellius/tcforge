@@ -17,10 +17,11 @@ build_cli() {
 }
 
 build_images() {
-    echo "→ Building Docker images (tag: $TAG)..."
+    BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    echo "→ Building Docker images (tag: $TAG, built: $BUILD_TIME)..."
     docker build -t ghcr.io/kevincornellius/tcforge-builder:$TAG ./docker/builder &
-    docker build --build-arg VERSION=$TAG -t ghcr.io/kevincornellius/tcforge-api:$TAG -f api/Dockerfile . &
-    docker build -t ghcr.io/kevincornellius/tcforge-judge:$TAG  -f judge/Dockerfile . &
+    docker build --build-arg VERSION=$TAG --build-arg BUILD_TIME=$BUILD_TIME -t ghcr.io/kevincornellius/tcforge-api:$TAG -f api/Dockerfile . &
+    docker build --build-arg VERSION=$TAG --build-arg BUILD_TIME=$BUILD_TIME -t ghcr.io/kevincornellius/tcforge-judge:$TAG -f judge/Dockerfile . &
     wait
     echo "  ✓ builder, api, judge images built with tag :$TAG"
 }

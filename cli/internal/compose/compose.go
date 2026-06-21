@@ -32,6 +32,10 @@ func Generate(contestDir, tag string) (string, error) {
 			extraJudge += fmt.Sprintf("      - %s=%s\n", key, val)
 		}
 	}
+	if val := os.Getenv("TCFORGE_DEV"); val != "" {
+		extraAPI += fmt.Sprintf("      - TCFORGE_DEV=%s\n", val)
+		extraJudge += fmt.Sprintf("      - TCFORGE_DEV=%s\n", val)
+	}
 
 	content := fmt.Sprintf(`services:
   api:
@@ -65,6 +69,7 @@ func Generate(contestDir, tag string) (string, error) {
       - %s:/contest
     environment:
       - TCFORGE_CONTEST_DIR=/contest
+      - TCFORGE_VERSION=%s
 %s    restart: unless-stopped
     depends_on:
       api:
@@ -74,7 +79,7 @@ func Generate(contestDir, tag string) (string, error) {
       options:
         max-size: "10m"
         max-file: "3"
-`, apiImage, contestDir, contestDir, tag, extraAPI, judgeImage, contestDir, extraJudge)
+`, apiImage, contestDir, contestDir, tag, extraAPI, judgeImage, contestDir, tag, extraJudge)
 
 	if err := os.WriteFile(composePath, []byte(content), 0644); err != nil {
 		return "", err

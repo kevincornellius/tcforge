@@ -45,16 +45,18 @@ jobs:
       - name: Build and push Docker images (multi-arch)
         run: |
           TAG=${GITHUB_REF_NAME}
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           docker buildx build --platform linux/amd64,linux/arm64 --push \
             -t ghcr.io/kevincornellius/tcforge-builder:$TAG \
             -t ghcr.io/kevincornellius/tcforge-builder:latest \
             ./docker/builder
           docker buildx build --platform linux/amd64,linux/arm64 --push \
-            --build-arg VERSION=$TAG \
+            --build-arg VERSION=$TAG --build-arg BUILD_TIME=$BUILD_TIME \
             -t ghcr.io/kevincornellius/tcforge-api:$TAG \
             -t ghcr.io/kevincornellius/tcforge-api:latest \
             -f api/Dockerfile .
           docker buildx build --platform linux/amd64,linux/arm64 --push \
+            --build-arg VERSION=$TAG --build-arg BUILD_TIME=$BUILD_TIME \
             -t ghcr.io/kevincornellius/tcforge-judge:$TAG \
             -t ghcr.io/kevincornellius/tcforge-judge:latest \
             -f judge/Dockerfile .

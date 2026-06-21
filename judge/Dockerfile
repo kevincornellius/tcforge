@@ -8,10 +8,13 @@ RUN go work sync
 COPY judge/ ./judge/
 COPY api/ ./api/
 COPY cli/ ./cli/
-RUN go build -o /bin/judge ./judge
+ARG BUILD_TIME
+RUN go build -ldflags "-X main.buildTime=${BUILD_TIME}" -o /bin/judge ./judge
 
 ### Final image: isolate sandbox + language runtimes
 FROM ubuntu:22.04
+ARG VERSION=dev
+ENV TCFORGE_VERSION=${VERSION}
 
 RUN apt-get update && apt-get install -y \
     g++ \

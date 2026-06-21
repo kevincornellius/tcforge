@@ -1,12 +1,21 @@
 import { useEffect, useState, useRef, FormEvent } from "react"
+import { Link } from "react-router-dom"
 import { api, AdminUser, AdminSubmission, Announcement, ContestState, Problem, StatementMeta } from "../api"
 
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—"
-  return new Date(iso).toLocaleString()
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short", day: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  })
 }
 
-type Tab = "users" | "contest" | "problems" | "announcements" | "submissions"
+function fmtLang(lang: string): string {
+  const map: Record<string, string> = { cpp17: "C++17", cpp20: "C++20", python3: "Python 3" }
+  return map[lang] ?? lang
+}
+
+type Tab = "contest" | "users" | "problems" | "announcements" | "submissions"
 
 export default function Admin() {
   const [tab, setTab] = useState<Tab>("contest")
@@ -16,19 +25,33 @@ export default function Admin() {
     api.version().then(v => setVersion(v.version)).catch(() => {})
   }, [])
 
+  const tabs: { key: Tab; label: string }[] = [
+    { key: "contest",       label: "Contest" },
+    { key: "users",         label: "Users" },
+    { key: "problems",      label: "Problems" },
+    { key: "announcements", label: "Announcements" },
+    { key: "submissions",   label: "Submissions" },
+  ]
+
   return (
-    <div className="page admin-page">
-      <div className="admin-header">
-        <h2>Admin</h2>
-        {version && <span className="version-badge">tcforge:{version}</span>}
+    <div>
+      <div className="admin-top">
+        <h1 className="page-title">Admin</h1>
+        {version && <span className="version-badge">tcforge v{version}</span>}
       </div>
+
       <div className="admin-tabs">
-        {(["contest", "users", "problems", "announcements", "submissions"] as Tab[]).map(t => (
-          <button key={t} className={`admin-tab${tab === t ? " active" : ""}`} onClick={() => setTab(t)}>
-            {t.charAt(0).toUpperCase() + t.slice(1)}
+        {tabs.map(t => (
+          <button
+            key={t.key}
+            className={`admin-tab${tab === t.key ? " active" : ""}`}
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
           </button>
         ))}
       </div>
+
       {tab === "contest"       && <ContestTab />}
       {tab === "users"         && <UsersTab />}
       {tab === "problems"      && <ProblemsTab />}
@@ -79,29 +102,29 @@ function ContestTab() {
   }
 
   if (!state) return (
-    <div className="admin-section">
+    <div>
       {err
-        ? <><p className="error">{err}</p><button onClick={load}>Retry</button></>
-        : <p>Loading…</p>
-      }
+        ? <><p className="error-msg">{err}</p><button className="btn btn-ghost btn-sm" onClick={load}>Retry</button></>
+        : <p className="muted-msg">Loading…</p>}
     </div>
   )
 
   const now = new Date()
   const started = state.start_at ? new Date(state.start_at) <= now : false
-  const ended = state.end_at ? new Date(state.end_at) <= now : false
+  const ended   = state.end_at   ? new Date(state.end_at)   <= now : false
   const running = started && !ended
 
   return (
-    <div className="admin-section">
-      {err && <p className="error">{err}</p>}
+    <div>
+      {err && <p className="error-msg" style={{ marginBottom: "var(--s4)" }}>{err}</p>}
 
-      <div className="contest-status-bar">
-        <span className={`contest-badge ${running ? "running" : ended ? "ended" : "idle"}`}>
+      <div className="status-bar">
+        <span className={`status-badge ${running ? "running" : ended ? "ended" : "idle"}`}>
+          {running && <span className="status-dot" />}
           {running ? "Running" : ended ? "Ended" : "Not started"}
         </span>
-        {state.start_at && <span className="contest-time">Start: {new Date(state.start_at).toLocaleString()}</span>}
-        {state.end_at   && <span className="contest-time">End: {new Date(state.end_at).toLocaleString()}</span>}
+        {state.start_at && <span className="status-time">Start: {new Date(state.start_at).toLocaleString()}</span>}
+        {state.end_at   && <span className="status-time">End: {new Date(state.end_at).toLocaleString()}</span>}
       </div>
 
       <div className="contest-actions">
@@ -114,53 +137,68 @@ function ContestTab() {
               className="datetime-input"
             />
             <button
-              className="btn-primary"
+              className="btn btn-primary btn-md"
               onClick={() => act(() => api.admin.startContest(scheduledStart || undefined))}
             >
               {scheduledStart ? "Schedule start" : "Start now"}
             </button>
           </>
         )}
-        {running  && <button className="btn-danger" onClick={() => act(api.admin.stopContest)}>Stop contest</button>}
-        {(started || ended) && <button className="btn-ghost" onClick={() => { setScheduledStart(""); act(api.admin.resetContest) }}>Reset timer</button>}
+        {running && (
+          <button className="btn btn-danger btn-md" onClick={() => act(api.admin.stopContest)}>
+            Stop contest
+          </button>
+        )}
+        {(started || ended) && (
+          <button className="btn btn-ghost btn-md" onClick={() => { setScheduledStart(""); act(api.admin.resetContest) }}>
+            Reset timer
+          </button>
+        )}
       </div>
 
       <form onSubmit={onSave} className="admin-form">
-        <h3>Settings</h3>
-        <label>Contest name
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="My Contest" required />
+        <p className="admin-form-title">Settings</p>
+        <label className="form-label">
+          Contest name
+          <input className="input-field" value={name} onChange={e => setName(e.target.value)} placeholder="My Contest" required />
         </label>
-        <label>Duration
-          <input value={duration} onChange={e => setDuration(e.target.value)} placeholder="3h, 90m, 2h30m" />
-          <span className="field-hint">Used when clicking "Start contest". Supports Go duration syntax.</span>
+        <label className="form-label">
+          Duration
+          <input className="input-field" value={duration} onChange={e => setDuration(e.target.value)} placeholder="3h, 90m, 2h30m" />
+          <span className="field-hint">Used when clicking "Start now". Supports Go duration syntax.</span>
         </label>
-        <label>Scoring mode
-          <select value={scoring} onChange={e => setScoring(e.target.value)}>
+        <label className="form-label">
+          Scoring mode
+          <select className="select-field" value={scoring} onChange={e => setScoring(e.target.value)}>
             <option value="ioi">IOI (partial, per-subtask)</option>
             <option value="icpc">ICPC (all-or-nothing, stop on first fail)</option>
           </select>
         </label>
-        <label className="admin-checkbox" style={{flexDirection:"row", gap:"0.5rem", alignItems:"center"}}>
+        <label className="admin-checkbox">
           <input type="checkbox" checked={alwaysOpen} onChange={e => setAlwaysOpen(e.target.checked)} />
           <span>
             Always open
-            <span className="field-hint" style={{display:"block"}}>
+            <span className="field-hint" style={{ display: "block" }}>
               Skip time enforcement — contestants can view problems at any time.
             </span>
           </span>
         </label>
         {alwaysOpen && (
-          <label className="admin-checkbox" style={{flexDirection:"row", gap:"0.5rem", alignItems:"center", marginLeft:"1.25rem"}}>
+          <label className="admin-checkbox checkbox-indent">
             <input type="checkbox" checked={allowSubmission} onChange={e => setAllowSubmission(e.target.checked)} />
             <span>
               Allow submissions
-              <span className="field-hint" style={{display:"block"}}>
-                Uncheck to make the contest read-only (view problems, no submitting).
+              <span className="field-hint" style={{ display: "block" }}>
+                Uncheck to make the contest read-only.
               </span>
             </span>
           </label>
         )}
-        <button type="submit" disabled={saving}>{saving ? "Saving…" : "Save settings"}</button>
+        <div>
+          <button className="btn btn-dark btn-md" type="submit" disabled={saving}>
+            {saving ? "Saving…" : "Save settings"}
+          </button>
+        </div>
       </form>
     </div>
   )
@@ -205,43 +243,65 @@ function UsersTab() {
   }
 
   return (
-    <div className="admin-section">
-      {err && <p className="error">{err}</p>}
-      <table className="table">
-        <thead><tr><th>#</th><th>Username</th><th>Display name</th><th>Admin</th><th>Actions</th></tr></thead>
-        <tbody>
-          {users.map(u => (
-            <tr key={u.id}>
-              <td>{u.id}</td><td>{u.username}</td><td>{u.display_name}</td>
-              <td>{u.is_admin ? "yes" : "—"}</td>
-              <td className="admin-actions">
-                {resetId === u.id ? (
-                  <>
-                    <input type="password" placeholder="New password" value={resetPw} onChange={e => setResetPw(e.target.value)} />
-                    <button onClick={() => onResetPassword(u.id)}>Save</button>
-                    <button className="btn-ghost" onClick={() => setResetId(null)}>Cancel</button>
-                  </>
-                ) : (
-                  <>
-                    <button className="btn-ghost" onClick={() => { setResetId(u.id); setResetPw("") }}>Reset pw</button>
-                    <button className="btn-danger" onClick={() => onDelete(u.id)}>Delete</button>
-                  </>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="admin-add">
-        <h3>Add user</h3>
-        <form onSubmit={onAdd}>
-          <input placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} required />
-          <input placeholder="Display name (optional)" value={displayName} onChange={e => setDisplayName(e.target.value)} />
-          <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required />
+    <div>
+      {err && <p className="error-msg" style={{ marginBottom: "var(--s4)" }}>{err}</p>}
+
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr><th>#</th><th>Username</th><th>Display name</th><th>Role</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            {users.map(u => (
+              <tr key={u.id}>
+                <td className="mono-label">{u.id}</td>
+                <td className="mono-label">{u.username}</td>
+                <td>{u.display_name}</td>
+                <td>
+                  {u.is_admin
+                    ? <span className="badge" style={{ background: "var(--color-dark)", color: "#fff" }}>admin</span>
+                    : <span style={{ color: "var(--color-faint)", fontSize: "0.8rem" }}>—</span>
+                  }
+                </td>
+                <td>
+                  <div className="admin-actions">
+                    {resetId === u.id ? (
+                      <>
+                        <input
+                          type="password"
+                          placeholder="New password"
+                          value={resetPw}
+                          onChange={e => setResetPw(e.target.value)}
+                          className="inline-input"
+                        />
+                        <button className="btn btn-dark btn-sm" onClick={() => onResetPassword(u.id)}>Save</button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setResetId(null)}>Cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="btn btn-ghost btn-sm" onClick={() => { setResetId(u.id); setResetPw("") }}>Set password</button>
+                        <button className="btn btn-danger btn-sm" onClick={() => onDelete(u.id)}>Delete</button>
+                      </>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="form-card">
+        <p className="form-card-title">Add user</p>
+        <form className="inline-form" onSubmit={onAdd}>
+          <input className="input-field" style={{ width: 140 }} placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} required />
+          <input className="input-field" style={{ width: 160 }} placeholder="Display name (opt.)" value={displayName} onChange={e => setDisplayName(e.target.value)} />
+          <input className="input-field" style={{ width: 140 }} type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required />
           <label className="admin-checkbox">
-            <input type="checkbox" checked={isAdmin} onChange={e => setIsAdmin(e.target.checked)} /> Admin
+            <input type="checkbox" checked={isAdmin} onChange={e => setIsAdmin(e.target.checked)} />
+            <span style={{ fontWeight: 500, fontSize: "0.875rem" }}>Admin</span>
           </label>
-          <button type="submit" disabled={adding}>{adding ? "Adding…" : "Add user"}</button>
+          <button className="btn btn-dark btn-md" type="submit" disabled={adding}>{adding ? "Adding…" : "Add user"}</button>
         </form>
       </div>
     </div>
@@ -259,8 +319,8 @@ function ProblemsTab() {
   useEffect(() => { load() }, [])
 
   return (
-    <div className="admin-section">
-      {err && <p className="error">{err}</p>}
+    <div>
+      {err && <p className="error-msg" style={{ marginBottom: "var(--s4)" }}>{err}</p>}
       {problems.map(p => (
         <ProblemEditor
           key={p.id}
@@ -270,6 +330,7 @@ function ProblemsTab() {
           onSaved={load}
         />
       ))}
+      {problems.length === 0 && !err && <p className="muted-msg">No problems yet.</p>}
     </div>
   )
 }
@@ -296,7 +357,6 @@ function ProblemEditor({ problem, open, onToggle, onSaved }: {
 
   useEffect(() => {
     if (!open) return
-    // refresh local state when opened
     setTitle(problem.title)
     setTl(String(problem.time_limit))
     setMl(String(problem.memory_limit))
@@ -358,55 +418,68 @@ function ProblemEditor({ problem, open, onToggle, onSaved }: {
 
   return (
     <div className="problem-editor">
-      <div className="problem-editor-header" onClick={onToggle}>
-        <span className="problem-editor-title">{problem.slug} — {problem.title}</span>
-        <span className="problem-editor-limits">{problem.time_limit}s / {problem.memory_limit}MB</span>
-        <span className="problem-editor-chevron">{open ? "▲" : "▼"}</span>
+      <div className={`ped-header${open ? " open" : ""}`} onClick={onToggle}>
+        <span className="ped-slug">{problem.slug}</span>
+        <span className="ped-title">{problem.title}</span>
+        <span className="ped-limits">{problem.time_limit}s / {problem.memory_limit}MB</span>
+        <span className="ped-chevron">▼</span>
       </div>
-      {open && (
-        <div className="problem-editor-body">
-          {err && <p className="error">{err}</p>}
 
-          <form onSubmit={onSave} className="admin-form problem-form">
-            <h4>Settings</h4>
-            <label>Title
-              <input value={title} onChange={e => setTitle(e.target.value)} required />
+      {open && (
+        <div className="ped-body">
+          {err && <p className="error-msg" style={{ marginBottom: "var(--s4)" }}>{err}</p>}
+
+          <form onSubmit={onSave} className="admin-form" style={{ marginBottom: "var(--s5)" }}>
+            <p className="ped-form-title">Settings</p>
+            <label className="form-label">
+              Title
+              <input className="input-field" value={title} onChange={e => setTitle(e.target.value)} required />
             </label>
             <div className="form-row">
-              <label>Time limit (s)
-                <input type="number" step="0.5" min="0.5" value={tl} onChange={e => setTl(e.target.value)} />
+              <label className="form-label">
+                Time limit (s)
+                <input className="input-field" type="number" step="0.5" min="0.5" value={tl} onChange={e => setTl(e.target.value)} />
               </label>
-              <label>Memory limit (MB)
-                <input type="number" min="16" value={ml} onChange={e => setMl(e.target.value)} />
+              <label className="form-label">
+                Memory limit (MB)
+                <input className="input-field" type="number" min="16" value={ml} onChange={e => setMl(e.target.value)} />
               </label>
             </div>
-            <button type="submit" disabled={saving}>{saving ? "Saving…" : "Save"}</button>
+            <div>
+              <button className="btn btn-dark btn-sm" type="submit" disabled={saving}>{saving ? "Saving…" : "Save"}</button>
+            </div>
           </form>
 
           <div className="stmt-section">
-            <h4>Statements</h4>
+            <p className="stmt-section-title">Statements</p>
             {statements.length > 0 ? (
-              <table className="table" style={{marginBottom:"0.75rem"}}>
-                <thead><tr><th>Language</th><th>Format</th><th></th></tr></thead>
-                <tbody>
-                  {statements.map((s: StatementMeta & { id: number }) => (
-                    <tr key={s.language}>
-                      <td>{s.label}</td>
-                      <td>{s.format.toUpperCase()}</td>
-                      <td>
-                        {s.id
-                          ? <button className="btn-danger" style={{padding:"0.2rem 0.5rem",fontSize:"0.8rem"}} onClick={() => onDeleteStmt(s.id)}>Delete</button>
-                          : <span style={{color:"#888",fontSize:"0.8rem"}}>legacy</span>
-                        }
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : <p style={{color:"#888",marginBottom:"0.75rem"}}>No uploaded statements (using built-in HTML).</p>}
+              <div className="table-wrap" style={{ marginBottom: "var(--s3)" }}>
+                <table className="table">
+                  <thead>
+                    <tr><th>Language</th><th>Format</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    {statements.map((s: StatementMeta & { id: number }) => (
+                      <tr key={s.language}>
+                        <td>{s.label}</td>
+                        <td className="mono-label">{s.format.toUpperCase()}</td>
+                        <td>
+                          {s.id
+                            ? <button className="btn btn-danger btn-xs" onClick={() => onDeleteStmt(s.id)}>Delete</button>
+                            : <span style={{ color: "var(--color-faint)", fontSize: "0.8rem" }}>legacy</span>
+                          }
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="muted-msg" style={{ marginBottom: "var(--s3)" }}>No uploaded statements.</p>
+            )}
 
             <form onSubmit={onUpload} className="stmt-upload-form">
-              <select value={lang} onChange={e => setLang(e.target.value)}>
+              <select value={lang} onChange={e => setLang(e.target.value)} className="select-field" style={{ width: "auto" }}>
                 <option value="en">English</option>
                 <option value="id">Bahasa Indonesia</option>
                 <option value="ja">日本語</option>
@@ -419,14 +492,18 @@ function ProblemEditor({ problem, open, onToggle, onSaved }: {
                 onChange={e => setFile(e.target.files?.[0] ?? null)}
                 required
               />
-              <button type="submit" disabled={uploading || !file}>{uploading ? "Uploading…" : "Upload"}</button>
+              <button className="btn btn-dark btn-sm" type="submit" disabled={uploading || !file}>
+                {uploading ? "Uploading…" : "Upload"}
+              </button>
             </form>
-            <p className="field-hint">Accepted formats: HTML, Markdown, PDF, TeX</p>
+            <p className="field-hint" style={{ marginTop: "var(--s2)" }}>Accepted: HTML, Markdown, PDF, TeX</p>
           </div>
 
           <div className="rebuild-section">
-            <h4>Test Cases</h4>
-            <p className="field-hint">Re-runs the builder container: recompiles spec.cpp, regenerates tc/, and regenerates config.json (subtask assignments).</p>
+            <p className="ped-form-title">Test Cases</p>
+            <p className="field-hint" style={{ marginBottom: "var(--s3)" }}>
+              Re-runs the builder container: recompiles spec.cpp, regenerates tc/ and config.json.
+            </p>
             <button
               className={`btn-rebuild ${rebuildStatus}`}
               onClick={onRebuild}
@@ -435,7 +512,7 @@ function ProblemEditor({ problem, open, onToggle, onSaved }: {
               {rebuildStatus === "building" ? "Building…" : "Rebuild Test Cases"}
             </button>
             {rebuildLog.length > 0 && (
-              <pre ref={logRef} className={`rebuild-log rebuild-log-${rebuildStatus}`}>
+              <pre ref={logRef} className={`rebuild-log ${rebuildStatus}`}>
                 {rebuildLog.join("\n")}
               </pre>
             )}
@@ -472,25 +549,37 @@ function AnnouncementsTab() {
   }
 
   return (
-    <div className="admin-section">
-      {err && <p className="error">{err}</p>}
-      <form onSubmit={onPost} className="announce-form">
-        <textarea
-          rows={3}
-          placeholder="Write an announcement…"
-          value={message}
-          onChange={e => setMessage(e.target.value)}
-          required
-        />
-        <button type="submit" disabled={posting}>{posting ? "Posting…" : "Post announcement"}</button>
-      </form>
-      {announcements.length === 0 && <p style={{color:"#888"}}>No announcements yet.</p>}
+    <div>
+      {err && <p className="error-msg" style={{ marginBottom: "var(--s4)" }}>{err}</p>}
+
+      <div className="announce-compose">
+        <form onSubmit={onPost} style={{ display: "flex", flexDirection: "column", gap: "var(--s3)" }}>
+          <textarea
+            className="textarea-field"
+            rows={3}
+            placeholder="Write an announcement…"
+            value={message}
+            onChange={e => setMessage(e.target.value)}
+            required
+          />
+          <div>
+            <button className="btn btn-dark btn-md" type="submit" disabled={posting}>
+              {posting ? "Posting…" : "Post announcement"}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {announcements.length === 0 && <p className="muted-msg">No announcements yet.</p>}
+
       <div className="announce-list">
         {announcements.map(a => (
-          <div key={a.id} className="announce-item">
+          <div key={a.id} className="announce-card">
             <span className="announce-time">{new Date(a.created_at).toLocaleString()}</span>
             <p className="announce-msg">{a.message}</p>
-            <button className="btn-danger" style={{padding:"0.2rem 0.5rem",fontSize:"0.8rem"}} onClick={() => onDelete(a.id)}>Delete</button>
+            <div className="announce-delete">
+              <button className="btn btn-danger btn-xs" onClick={() => onDelete(a.id)}>Delete</button>
+            </div>
           </div>
         ))}
       </div>
@@ -516,37 +605,42 @@ function SubmissionsTab() {
   }
 
   return (
-    <div className="admin-section">
-      {err && <p className="error">{err}</p>}
-      <table className="table">
-        <thead>
-          <tr><th>#</th><th>User</th><th>Problem</th><th>Lang</th><th>Verdict</th><th>Score</th><th>Submitted</th><th>Graded</th><th></th></tr>
-        </thead>
-        <tbody>
-          {subs.map(s => (
-            <tr key={s.id}>
-              <td><a href={`/submissions/${s.id}`} target="_blank" rel="noreferrer">{s.id}</a></td>
-              <td>{s.username}</td>
-              <td>{s.problem_slug}</td>
-              <td>{s.language}</td>
-              <td className={`verdict verdict-${s.verdict}`}>{s.verdict || s.status}</td>
-              <td>{s.score}</td>
-              <td className="date-cell">{fmtDate(s.submitted_at)}</td>
-              <td className="date-cell">{fmtDate(s.graded_at)}</td>
-              <td>
-                <button
-                  className="btn-ghost"
-                  style={{padding:"0.2rem 0.6rem",fontSize:"0.8rem"}}
-                  disabled={rejudging === s.id}
-                  onClick={() => onRejudge(s.id)}
-                >
-                  {rejudging === s.id ? "…" : "Rejudge"}
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div>
+      {err && <p className="error-msg" style={{ marginBottom: "var(--s4)" }}>{err}</p>}
+      <div className="admin-sub-list">
+        {subs.length === 0 && (
+          <p className="muted-msg" style={{ padding: "2rem", textAlign: "center" }}>No submissions yet.</p>
+        )}
+        {subs.map(s => (
+          <div key={s.id} className="admin-sub-row">
+            <Link to={`/submissions/${s.id}`} className="admin-sub-id">#{s.id}</Link>
+            <div className="admin-sub-who">
+              <span className="admin-sub-user">{s.username}</span>
+              <Link to={`/problems/${s.problem_slug}`} className="admin-sub-prob">{s.problem_slug}</Link>
+              <span className="admin-sub-lang">{fmtLang(s.language)}</span>
+            </div>
+            <div className="admin-sub-verdict">
+              <span className={`badge badge-${s.verdict || s.status}`}>{s.verdict || s.status}</span>
+              {s.score > 0 && <span className="admin-sub-score">{s.score}pts</span>}
+            </div>
+            <div className="admin-sub-perf">
+              <span>{s.time_ms > 0 ? `${s.time_ms}ms` : "—"}</span>
+              <span>{s.memory_kb > 0 ? `${s.memory_kb}KB` : "—"}</span>
+            </div>
+            <div className="admin-sub-dates">
+              <span>{fmtDate(s.submitted_at)}</span>
+              {s.graded_at && <span className="admin-sub-graded">{fmtDate(s.graded_at)}</span>}
+            </div>
+            <button
+              className="btn btn-ghost btn-xs"
+              disabled={rejudging === s.id}
+              onClick={() => onRejudge(s.id)}
+            >
+              {rejudging === s.id ? "…" : "Rejudge"}
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

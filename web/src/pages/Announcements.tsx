@@ -12,18 +12,25 @@ export default function Announcements() {
   }, [])
 
   return (
-    <div className="page">
-      <h2>Announcements</h2>
-      {err && <p className="error">{err}</p>}
-      {items.length === 0 && <p style={{ color: "#888" }}>No announcements.</p>}
-      <div className="announce-list">
-        {items.map(a => (
-          <div key={a.id} className="announce-item">
-            <span className="announce-time">{new Date(a.created_at).toLocaleString()}</span>
-            <p className="announce-msg">{a.message}</p>
-          </div>
-        ))}
+    <div>
+      <div className="page-header">
+        <h1 className="page-title">Announcements</h1>
       </div>
+
+      {err && <p className="error-msg">{err}</p>}
+
+      {items.length === 0 ? (
+        <p className="muted-msg">No announcements yet.</p>
+      ) : (
+        <div className="announce-list">
+          {items.map(a => (
+            <div key={a.id} className="announce-card">
+              <span className="announce-time">{new Date(a.created_at).toLocaleString()}</span>
+              <p className="announce-msg">{a.message}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

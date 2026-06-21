@@ -25,10 +25,11 @@ cd web && npm install --silent && npm run build
 cd "$ROOT"
 
 echo ""
-echo "==> Building Docker images (tag: $TAG)"
+BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+echo "==> Building Docker images (tag: $TAG, built: $BUILD_TIME)"
 docker build -t "$REGISTRY/tcforge-builder:$TAG" ./docker/builder
-docker build -t "$REGISTRY/tcforge-api:$TAG"     -f api/Dockerfile .
-docker build -t "$REGISTRY/tcforge-judge:$TAG"   -f judge/Dockerfile .
+docker build --build-arg VERSION="$TAG" --build-arg BUILD_TIME="$BUILD_TIME" -t "$REGISTRY/tcforge-api:$TAG"   -f api/Dockerfile .
+docker build --build-arg VERSION="$TAG" --build-arg BUILD_TIME="$BUILD_TIME" -t "$REGISTRY/tcforge-judge:$TAG" -f judge/Dockerfile .
 
 echo ""
 echo "==> Pushing images"

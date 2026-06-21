@@ -1,18 +1,39 @@
 import { useEffect, useState } from "react"
-import { useParams } from "react-router-dom"
+import { useParams, Link } from "react-router-dom"
 import { api, Submission as Sub, Verdict, SubtaskScore } from "../api"
+import hljs from "highlight.js/lib/core"
+import cpp from "highlight.js/lib/languages/cpp"
+import python from "highlight.js/lib/languages/python"
+
+hljs.registerLanguage("cpp", cpp)
+hljs.registerLanguage("python", python)
+
+const HLJS_LANG: Record<string, string> = { cpp17: "cpp", cpp20: "cpp", python3: "python" }
 
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—"
-  return new Date(iso).toLocaleString()
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short", day: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  })
+}
+
+function fmtLang(lang: string): string {
+  const map: Record<string, string> = { cpp17: "C++17", cpp20: "C++20", python3: "Python 3" }
+  return map[lang] ?? lang
 }
 
 interface SubtaskConfig {
-  test_groups: number[][]  // [i] = subtask IDs group i+1 belongs to
-  points: number[]         // [j] = points for subtask j+1
+  test_groups: number[][]
+  points: number[]
 }
 
-function CopyButton({ text }: { text: string }) {
+function VerdictBadge({ verdict, status, size }: { verdict: string; status?: string; size?: "lg" }) {
+  const v = verdict || status || ""
+  return <span className={`badge${size === "lg" ? " badge-lg" : ""} badge-${v}`}>{v || "—"}</span>
+}
+
+function CopyButton({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false)
   function copy() {
     navigator.clipboard.writeText(text).then(() => {
@@ -20,12 +41,61 @@ function CopyButton({ text }: { text: string }) {
       setTimeout(() => setCopied(false), 2000)
     })
   }
+  return <button className={className ?? "copy-btn"} onClick={copy}>{copied ? "Copied!" : "Copy"}</button>
+}
+
+function SourceCode({ code, language }: { code: string; language: string }) {
+  const lang = HLJS_LANG[language] ?? "plaintext"
+  const highlighted = lang !== "plaintext"
+    ? hljs.highlight(code, { language: lang }).value
+    : code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   return (
-    <button className="copy-btn" onClick={copy}>{copied ? "Copied!" : "Copy"}</button>
+    <div className="src-wrap">
+      <CopyButton text={code} className="src-copy-btn" />
+      <pre className="src-code"><code dangerouslySetInnerHTML={{ __html: highlighted }} /></pre>
+    </div>
   )
 }
 
-export default function Submission() {
+function Accordion({
+  label,
+  right,
+  defaultOpen,
+  children,
+  inner,
+}: {
+  label: React.ReactNode
+  right?: React.ReactNode
+  defaultOpen?: boolean
+  children: React.ReactNode
+  inner?: boolean
+}) {
+  const [open, setOpen] = useState(!!defaultOpen)
+  if (inner) {
+    return (
+      <div className="col-inner">
+        <button className="col-inner-header" onClick={() => setOpen(o => !o)}>
+          <span className={`col-chevron${open ? " open" : ""}`}>▶</span>
+          {label}
+          <div className="col-right">{right}</div>
+        </button>
+        {open && <div className="col-inner-content">{children}</div>}
+      </div>
+    )
+  }
+  return (
+    <div className="col-section">
+      <button className="col-header" onClick={() => setOpen(o => !o)}>
+        <span className={`col-chevron${open ? " open" : ""}`}>▶</span>
+        {label}
+        <div className="col-right">{right}</div>
+      </button>
+      {open && <div className="col-content">{children}</div>}
+    </div>
+  )
+}
+
+export default function SubmissionPage() {
   const { id } = useParams<{ id: string }>()
   const [sub, setSub] = useState<Sub | null>(null)
   const [verdicts, setVerdicts] = useState<Verdict[]>([])
@@ -42,7 +112,6 @@ export default function Submission() {
         setSub(r.submission)
         setVerdicts(r.verdicts ?? [])
         setSubtaskScores(r.subtask_scores ?? [])
-        // fetch subtask config once we know the problem slug
         api.subtasks(r.submission.problem_slug).then(cfg => {
           if (cfg.test_groups?.length) setSubtaskCfg(cfg)
         }).catch(() => {})
@@ -63,12 +132,12 @@ export default function Submission() {
     return () => clearInterval(interval)
   }, [id])
 
-  if (err) return <p className="error">{err}</p>
-  if (!sub) return <p>Loading…</p>
+  if (err) return <p className="error-msg">{err}</p>
+  if (!sub) return <p className="muted-msg">Loading…</p>
 
   const pending = sub.status === "queued" || sub.status === "pending" || sub.status === "judging"
+  const displayVerdict = sub.verdict || sub.status
 
-  // group_num -> verdicts
   const byGroup = new Map<number, Verdict[]>()
   for (const v of verdicts) {
     if (!byGroup.has(v.group_num)) byGroup.set(v.group_num, [])
@@ -77,8 +146,6 @@ export default function Submission() {
 
   const hasSubtasks = subtaskScores.length > 0
 
-  // Build subtask view: each subtask -> its groups -> verdicts
-  // subtask i (1-indexed) contains groups where test_groups[g-1] includes i
   const subtaskGroups = (subtaskNum: number): number[] => {
     if (!subtaskCfg) return []
     return subtaskCfg.test_groups
@@ -95,95 +162,154 @@ export default function Submission() {
   }
 
   return (
-    <div className="page">
-      <h2>Submission #{sub.id}</h2>
-      <p className="sub-meta">
-        <strong>{sub.problem_title}</strong> &nbsp;·&nbsp;
-        {sub.language} &nbsp;·&nbsp;
-        <span className={`verdict verdict-${sub.verdict || sub.status}`}>
-          {sub.verdict || sub.status}
-        </span>
-        &nbsp;·&nbsp; <strong>{sub.score} pts</strong>
-        {sub.time_ms > 0 && <> &nbsp;·&nbsp; {sub.time_ms}ms</>}
-      </p>
-      <p className="sub-dates">
-        Submitted: {fmtDate(sub.submitted_at)}
-        {sub.graded_at && <> &nbsp;·&nbsp; Graded: {fmtDate(sub.graded_at)}</>}
-      </p>
+    <div>
+      {/* Header */}
+      <div className="sub-card">
+        <div className={`sub-verdict-stripe verdict-${displayVerdict}`} />
+        <div className="sub-card-inner">
+          <div className="sub-info">
+            <span className="sub-num">Submission #{sub.id}</span>
+            <Link to={`/problems/${sub.problem_slug}`} className="sub-prob-name">
+              {sub.problem_title}
+            </Link>
+            <div className="sub-details">
+              <span className="sub-detail-item">
+                <span className="sub-detail-label">Lang</span>
+                <span className="sub-detail-val">{fmtLang(sub.language)}</span>
+              </span>
+              {sub.time_ms > 0 && (
+                <span className="sub-detail-item">
+                  <span className="sub-detail-label">Time</span>
+                  <span className="sub-detail-val">{sub.time_ms}ms</span>
+                </span>
+              )}
+              {sub.memory_kb > 0 && (
+                <span className="sub-detail-item">
+                  <span className="sub-detail-label">Mem</span>
+                  <span className="sub-detail-val">{sub.memory_kb}KB</span>
+                </span>
+              )}
+              <span className="sub-detail-item">
+                <span className="sub-detail-label">Submitted</span>
+                <span className="sub-detail-val">{fmtDate(sub.submitted_at)}</span>
+              </span>
+              {sub.graded_at && (
+                <span className="sub-detail-item">
+                  <span className="sub-detail-label">Graded</span>
+                  <span className="sub-detail-val">{fmtDate(sub.graded_at)}</span>
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="sub-result">
+            <VerdictBadge verdict={sub.verdict} status={sub.status} size="lg" />
+            {sub.score > 0 && <span className="sub-score">{sub.score} pts</span>}
+          </div>
+        </div>
+      </div>
 
+      {/* Judging progress */}
       {pending && (
-        <p className="judging-status">
-          {sub.status === "queued" ? "Queued…" : `Running… (${verdicts.length} test case${verdicts.length !== 1 ? "s" : ""} done)`}
-        </p>
+        <div className="judging-bar">
+          <span className="judging-dot" />
+          {sub.status === "queued"
+            ? "In queue…"
+            : `Judging… (${verdicts.length} test case${verdicts.length !== 1 ? "s" : ""} done)`}
+        </div>
       )}
 
-      {hasSubtasks && (
-        <div className="subtask-summary">
-          <h3>Subtasks</h3>
-          <div className="subtask-grid">
-            {subtaskScores.map(s => (
-              <div key={s.subtask_num} className={`subtask-card verdict-${s.verdict}`}>
-                <div className="subtask-num">Subtask {s.subtask_num}</div>
-                <div className="subtask-score">{s.score}/{s.max_score}</div>
-                <div className={`verdict verdict-${s.verdict}`}>{s.verdict}</div>
+      {/* Subtask summary */}
+      {/* Verdict tree */}
+      {verdicts.length > 0 && (
+        <div style={{ marginBottom: "var(--s5)" }}>
+          <p className="section-label">Test Cases</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--s2)" }}>
+            {hasSubtasks && subtaskCfg ? (
+              subtaskScores.map(s => {
+                const groups = subtaskGroups(s.subtask_num)
+                const stVerdicts = groups.flatMap(g => byGroup.get(g) ?? [])
+                const stMaxTime = stVerdicts.reduce((m, v) => Math.max(m, v.time_ms), 0)
+                const stMaxMem  = stVerdicts.reduce((m, v) => Math.max(m, v.memory_kb), 0)
+                return (
+                  <Accordion
+                    key={s.subtask_num}
+                    label={`Subtask ${s.subtask_num}`}
+                    defaultOpen={s.verdict !== "AC"}
+                    right={
+                      <>
+                        {stMaxTime > 0 && <span className="col-stat">{stMaxTime}ms</span>}
+                        {stMaxMem  > 0 && <span className="col-stat">{stMaxMem}KB</span>}
+                        <span className="col-score">{s.score}/{s.max_score} pts</span>
+                        <VerdictBadge verdict={s.verdict} />
+                      </>
+                    }
+                  >
+                    {groups.map(g => {
+                      const gVs = byGroup.get(g) ?? []
+                      const gMaxTime = gVs.reduce((m, v) => Math.max(m, v.time_ms), 0)
+                      const gMaxMem  = gVs.reduce((m, v) => Math.max(m, v.memory_kb), 0)
+                      return (
+                        <Accordion
+                          key={g}
+                          inner
+                          label={`Group ${g}`}
+                          defaultOpen={groupVerdict(g) !== "AC"}
+                          right={
+                            <>
+                              {gMaxTime > 0 && <span className="col-stat">{gMaxTime}ms</span>}
+                              {gMaxMem  > 0 && <span className="col-stat">{gMaxMem}KB</span>}
+                              <span className="tc-count">{gVs.length} TCs</span>
+                              <VerdictBadge verdict={groupVerdict(g)} />
+                            </>
+                          }
+                        >
+                          {byGroup.has(g) && <VerdictTable verdicts={byGroup.get(g)!} />}
+                        </Accordion>
+                      )
+                    })}
+                    <div style={{ height: "var(--s2)" }} />
+                  </Accordion>
+                )
+              })
+            ) : hasSubtasks ? (
+              Array.from(byGroup.entries()).sort(([a], [b]) => a - b).map(([g, vs]) => {
+                const gMaxTime = vs.reduce((m, v) => Math.max(m, v.time_ms), 0)
+                const gMaxMem  = vs.reduce((m, v) => Math.max(m, v.memory_kb), 0)
+                return (
+                  <Accordion
+                    key={g}
+                    label={`Group ${g}`}
+                    defaultOpen={vs.some(v => v.verdict !== "AC")}
+                    right={
+                      <>
+                        {gMaxTime > 0 && <span className="col-stat">{gMaxTime}ms</span>}
+                        {gMaxMem  > 0 && <span className="col-stat">{gMaxMem}KB</span>}
+                        <span className="tc-count">{vs.length} TCs</span>
+                        <VerdictBadge verdict={groupVerdict(g)} />
+                      </>
+                    }
+                  >
+                    <VerdictTable verdicts={vs} />
+                  </Accordion>
+                )
+              })
+            ) : (
+              <div className="table-wrap">
+                <VerdictTable verdicts={verdicts} />
               </div>
-            ))}
+            )}
           </div>
         </div>
       )}
 
-      {verdicts.length > 0 && (
-        <div className="verdict-section">
-          <h3>Test cases</h3>
-          {hasSubtasks && subtaskCfg ? (
-            // Group by subtask, then show groups inside each subtask
-            subtaskScores.map(s => {
-              const groups = subtaskGroups(s.subtask_num)
-              return (
-                <details key={s.subtask_num} open={s.verdict !== "AC"} className="subtask-details">
-                  <summary className="group-summary">
-                    Subtask {s.subtask_num}
-                    <span className="summary-score">{s.score}/{s.max_score} pts</span>
-                    <span className={`verdict verdict-${s.verdict}`}>{s.verdict}</span>
-                  </summary>
-                  {groups.map(g => (
-                    <details key={g} open={groupVerdict(g) !== "AC"} className="group-details">
-                      <summary className="group-summary group-summary-inner">
-                        Group {g}
-                        <span className={`verdict verdict-${groupVerdict(g)}`}>{groupVerdict(g)}</span>
-                        <span className="tc-count">{byGroup.get(g)?.length ?? 0} TCs</span>
-                      </summary>
-                      {byGroup.has(g) && <VerdictTable verdicts={byGroup.get(g)!} />}
-                    </details>
-                  ))}
-                </details>
-              )
-            })
-          ) : hasSubtasks ? (
-            // Has subtask scores but no config — group by group_num
-            Array.from(byGroup.entries()).sort(([a], [b]) => a - b).map(([g, vs]) => (
-              <details key={g} open={vs.some(v => v.verdict !== "AC")}>
-                <summary className="group-summary">
-                  Group {g}
-                  <span className={`verdict verdict-${groupVerdict(g)}`}>{groupVerdict(g)}</span>
-                </summary>
-                <VerdictTable verdicts={vs} />
-              </details>
-            ))
-          ) : (
-            <VerdictTable verdicts={verdicts} />
-          )}
-        </div>
-      )}
-
+      {/* Source code */}
       {sub.code && (
-        <details className="source-section">
-          <summary className="group-summary">
+        <details className="src-details">
+          <summary className="src-summary">
             Source code
-            <span className="tc-count">{sub.language}</span>
-            <CopyButton text={sub.code} />
+            <span className="tc-count" style={{ marginLeft: "var(--s2)", fontFamily: "var(--mono)" }}>{fmtLang(sub.language)}</span>
           </summary>
-          <pre className="source-code">{sub.code}</pre>
+          <SourceCode code={sub.code} language={sub.language} />
         </details>
       )}
     </div>
@@ -192,17 +318,22 @@ export default function Submission() {
 
 function VerdictTable({ verdicts }: { verdicts: Verdict[] }) {
   return (
-    <table className="table verdict-table">
+    <table className="table">
       <thead>
-        <tr><th>Test case</th><th>Verdict</th><th>Time</th><th>Memory</th></tr>
+        <tr>
+          <th>Test case</th>
+          <th>Verdict</th>
+          <th>Time</th>
+          <th>Memory</th>
+        </tr>
       </thead>
       <tbody>
         {verdicts.map(v => (
           <tr key={v.test_case}>
-            <td>{v.test_case}</td>
-            <td className={`verdict verdict-${v.verdict}`}>{v.verdict}</td>
-            <td>{v.time_ms > 0 ? `${v.time_ms}ms` : "—"}</td>
-            <td>{v.memory_kb > 0 ? `${v.memory_kb}KB` : "—"}</td>
+            <td className="mono-label">{v.test_case}</td>
+            <td><span className={`badge badge-${v.verdict}`}>{v.verdict}</span></td>
+            <td className="mono-label">{v.time_ms > 0 ? `${v.time_ms}ms` : "< 1ms"}</td>
+            <td className="mono-label">{v.memory_kb > 0 ? `${v.memory_kb}KB` : "—"}</td>
           </tr>
         ))}
       </tbody>

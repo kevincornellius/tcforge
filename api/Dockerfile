@@ -17,7 +17,8 @@ RUN go work sync
 COPY api/ ./api/
 COPY judge/ ./judge/
 COPY cli/ ./cli/
-RUN go build -o /bin/api ./api
+ARG BUILD_TIME
+RUN go build -ldflags "-X main.buildTime=${BUILD_TIME}" -o /bin/api ./api
 
 ### Stage 3: final image
 FROM alpine:3.20
