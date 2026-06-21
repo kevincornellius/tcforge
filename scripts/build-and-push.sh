@@ -26,16 +26,11 @@ cd "$ROOT"
 
 echo ""
 BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-echo "==> Building Docker images (tag: $TAG, built: $BUILD_TIME)"
-docker build -t "$REGISTRY/tcforge-builder:$TAG" ./docker/builder
-docker build --build-arg VERSION="$TAG" --build-arg BUILD_TIME="$BUILD_TIME" -t "$REGISTRY/tcforge-api:$TAG"   -f api/Dockerfile .
-docker build --build-arg VERSION="$TAG" --build-arg BUILD_TIME="$BUILD_TIME" -t "$REGISTRY/tcforge-judge:$TAG" -f judge/Dockerfile .
-
-echo ""
-echo "==> Pushing images"
-docker push "$REGISTRY/tcforge-builder:$TAG"
-docker push "$REGISTRY/tcforge-api:$TAG"
-docker push "$REGISTRY/tcforge-judge:$TAG"
+PLATFORMS="linux/amd64,linux/arm64"
+echo "==> Building + pushing multi-platform Docker images (tag: $TAG, platforms: $PLATFORMS)"
+docker buildx build --platform "$PLATFORMS" --push -t "$REGISTRY/tcforge-builder:$TAG" ./docker/builder
+docker buildx build --platform "$PLATFORMS" --push --build-arg VERSION="$TAG" --build-arg BUILD_TIME="$BUILD_TIME" -t "$REGISTRY/tcforge-api:$TAG"   -f api/Dockerfile .
+docker buildx build --platform "$PLATFORMS" --push --build-arg VERSION="$TAG" --build-arg BUILD_TIME="$BUILD_TIME" -t "$REGISTRY/tcforge-judge:$TAG" -f judge/Dockerfile .
 
 echo ""
 echo "Done. Binary at ./tcforge | Images pushed as :$TAG"

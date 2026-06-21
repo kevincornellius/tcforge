@@ -87,20 +87,17 @@ func ghcrPush(cfg *config.Config, cwd string) error {
 		return err
 	}
 
-	fmt.Printf("→ Building %s (linux/amd64)...\n", image)
-	buildCmd := exec.Command("docker", "build", "--platform", "linux/amd64", "-t", image, cwd)
+	fmt.Printf("→ Building and pushing %s (linux/amd64)...\n", image)
+	buildCmd := exec.Command("docker", "buildx", "build",
+		"--platform", "linux/amd64",
+		"--push",
+		"-t", image,
+		cwd,
+	)
 	buildCmd.Stdout = os.Stdout
 	buildCmd.Stderr = os.Stderr
 	if err := buildCmd.Run(); err != nil {
-		return fmt.Errorf("docker build failed: %w", err)
-	}
-
-	fmt.Printf("→ Pushing %s...\n", image)
-	pushCmd := exec.Command("docker", "push", image)
-	pushCmd.Stdout = os.Stdout
-	pushCmd.Stderr = os.Stderr
-	if err := pushCmd.Run(); err != nil {
-		return fmt.Errorf("docker push failed (run 'docker login ghcr.io' first): %w", err)
+		return fmt.Errorf("docker build failed (run 'docker login ghcr.io' first if pushing to GHCR): %w", err)
 	}
 
 	fmt.Printf("\n✓ Image pushed: %s\n", image)
@@ -220,8 +217,8 @@ func buildDeployDockerfile(baseTag string) string {
 	registry := "ghcr.io/kevincornellius"
 	return fmt.Sprintf(`# syntax=docker/dockerfile:1
 ARG BASE_TAG=%s
-FROM %s/tcforge-api:${BASE_TAG} AS api-src
-FROM %s/tcforge-judge:${BASE_TAG}
+FROM --platform=linux/amd64 %s/tcforge-api:${BASE_TAG} AS api-src
+FROM --platform=linux/amd64 %s/tcforge-judge:${BASE_TAG}
 
 COPY --from=api-src /bin/api /bin/api
 COPY --from=api-src /app/web/dist /app/web/dist
@@ -415,7 +412,7 @@ func buildEmitDockerfile(cfg *config.Config, baseTag string) string {
 
 	// Stage 1: build test cases
 	fmt.Fprintf(&b, "# ── Stage 1: compile specs + generate test cases ────────────────────────────\n")
-	fmt.Fprintf(&b, "FROM %s/tcforge-builder:%s AS tc-builder\n\n", registry, baseTag)
+	fmt.Fprintf(&b, "FROM --platform=linux/amd64 %s/tcforge-builder:%s AS tc-builder\n\n", registry, baseTag)
 	fmt.Fprintf(&b, "COPY %s /contest/%s\n\n", yamlFilename, yamlFilename)
 
 	for _, p := range cfg.Problems {
@@ -435,11 +432,11 @@ func buildEmitDockerfile(cfg *config.Config, baseTag string) string {
 
 	// Stage 2: API source
 	b.WriteString("# ── Stage 2: tcforge API binary + web frontend ──────────────────────────────\n")
-	fmt.Fprintf(&b, "FROM %s/tcforge-api:%s AS api-src\n\n", registry, baseTag)
+	fmt.Fprintf(&b, "FROM --platform=linux/amd64 %s/tcforge-api:%s AS api-src\n\n", registry, baseTag)
 
 	// Stage 3: final image (judge base has ubuntu 22.04 + g++ + isolate)
 	b.WriteString("# ── Stage 3: final deploy image ─────────────────────────────────────────────\n")
-	fmt.Fprintf(&b, "FROM %s/tcforge-judge:%s\n\n", registry, baseTag)
+	fmt.Fprintf(&b, "FROM --platform=linux/amd64 %s/tcforge-judge:%s\n\n", registry, baseTag)
 	b.WriteString("COPY --from=api-src /bin/api /bin/api\n")
 	b.WriteString("COPY --from=api-src /app/web/dist /app/web/dist\n\n")
 	b.WriteString("COPY --from=tc-builder /contest /contest\n\n")

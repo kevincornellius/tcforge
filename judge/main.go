@@ -58,10 +58,17 @@ func main() {
 		contestDir = "/contest"
 	}
 
-	// Detect isolate sandbox.
+	// Detect isolate sandbox — probe with a real --init to catch missing
+	// cgroup privileges (e.g. Fly.io without privileged mode).
 	if _, err := exec.LookPath("isolate"); err == nil {
-		isolateAvailable = true
-		dlog("sandbox: using isolate")
+		probe := exec.Command("isolate", "--cg", "--box-id=99", "--init")
+		if probe.Run() == nil {
+			exec.Command("isolate", "--cg", "--box-id=99", "--cleanup").Run()
+			isolateAvailable = true
+			dlog("sandbox: using isolate")
+		} else {
+			dlog("sandbox: isolate found but cgroup init failed — falling back to ulimit")
+		}
 	} else {
 		dlog("sandbox: isolate not found — falling back to ulimit (dev mode)")
 	}
