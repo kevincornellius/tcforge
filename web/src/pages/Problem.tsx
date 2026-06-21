@@ -62,6 +62,7 @@ export default function Problem() {
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [err, setErr] = useState("")
   const [sideTab, setSideTab] = useState<"submit" | "history">("submit")
+  const [mobileOpen, setMobileOpen] = useState(false)
 
   useEffect(() => {
     if (!statement) return
@@ -74,16 +75,27 @@ export default function Problem() {
     el.querySelectorAll<HTMLPreElement>("pre").forEach(pre => {
       if (pre.dataset.copyBtn) return
       pre.dataset.copyBtn = "1"
+      const ICON_COPY = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`
+      const ICON_CHECK = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
       const btn = document.createElement("button")
       btn.className = "pre-copy-btn"
-      btn.textContent = "Copy"
+      btn.title = "Copy"
+      btn.innerHTML = ICON_COPY
       btn.addEventListener("click", () => {
-        navigator.clipboard.writeText(pre.innerText.replace(/\nCopy$/, "")).then(() => {
-          btn.textContent = "Copied!"
-          setTimeout(() => { btn.textContent = "Copy" }, 2000)
+        const code = pre.querySelector("code")?.innerText ?? pre.innerText
+        navigator.clipboard.writeText(code).then(() => {
+          btn.innerHTML = ICON_CHECK
+          setTimeout(() => { btn.innerHTML = ICON_COPY }, 2000)
         })
       })
-      pre.appendChild(btn)
+      const wrapper = document.createElement("div")
+      wrapper.className = "pre-wrap"
+      pre.parentNode!.insertBefore(wrapper, pre)
+      wrapper.appendChild(pre)
+      const toolbar = document.createElement("div")
+      toolbar.className = "pre-toolbar"
+      toolbar.appendChild(btn)
+      wrapper.insertBefore(toolbar, pre)
     })
   }, [statement])
 
@@ -143,6 +155,7 @@ export default function Problem() {
           <div className="limit-chips">
             <span className="limit-chip">⏱ {problem.time_limit}s</span>
             <span className="limit-chip">💾 {problem.memory_limit}MB</span>
+            {problem.has_scorer && <span className="limit-chip limit-chip-scorer">Special Judge</span>}
           </div>
           {availLangs.length > 1 && (
             <div className="lang-switcher">
@@ -172,17 +185,18 @@ export default function Problem() {
           )}
         </div>
 
-        {/* Right: sticky tabbed panel */}
-        <div className="problem-submit-col">
+        {/* Right: sticky tabbed panel / mobile bottom sheet */}
+        <div className={`problem-submit-col${mobileOpen ? " mobile-open" : ""}`}>
+          <div className="mobile-sheet-handle" onClick={() => setMobileOpen(o => !o)} />
           <div className="submit-panel">
             <div className="side-tabs">
               <button
                 className={`side-tab${sideTab === "submit" ? " active" : ""}`}
-                onClick={() => setSideTab("submit")}
+                onClick={() => { setSideTab("submit"); setMobileOpen(true) }}
               >Submit</button>
               <button
                 className={`side-tab${sideTab === "history" ? " active" : ""}`}
-                onClick={() => setSideTab("history")}
+                onClick={() => { setSideTab("history"); setMobileOpen(true) }}
               >
                 My submissions
                 {submissions.length > 0 && <span className="side-tab-count">{submissions.length}</span>}

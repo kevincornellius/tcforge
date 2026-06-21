@@ -135,18 +135,19 @@ func migrateSQLite() error {
 			position     INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE TABLE IF NOT EXISTS submissions (
-			id           INTEGER PRIMARY KEY AUTOINCREMENT,
-			user_id      INTEGER NOT NULL REFERENCES users(id),
-			problem_id   INTEGER NOT NULL REFERENCES problems(id),
-			language     TEXT NOT NULL,
-			code         TEXT NOT NULL,
-			status       TEXT NOT NULL DEFAULT 'queued',
-			verdict      TEXT NOT NULL DEFAULT '',
-			score        INTEGER NOT NULL DEFAULT 0,
-			time_ms      INTEGER NOT NULL DEFAULT 0,
-			memory_kb    INTEGER NOT NULL DEFAULT 0,
-			submitted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			graded_at    DATETIME
+			id             INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id        INTEGER NOT NULL REFERENCES users(id),
+			problem_id     INTEGER NOT NULL REFERENCES problems(id),
+			language       TEXT NOT NULL,
+			code           TEXT NOT NULL,
+			status         TEXT NOT NULL DEFAULT 'queued',
+			verdict        TEXT NOT NULL DEFAULT '',
+			score          INTEGER NOT NULL DEFAULT 0,
+			time_ms        INTEGER NOT NULL DEFAULT 0,
+			memory_kb      INTEGER NOT NULL DEFAULT 0,
+			compile_output TEXT NOT NULL DEFAULT '',
+			submitted_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			graded_at      DATETIME
 		)`,
 		`CREATE TABLE IF NOT EXISTS verdicts (
 			id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -198,6 +199,7 @@ func migrateSQLite() error {
 	}
 	runIgnored(
 		"ALTER TABLE submissions ADD COLUMN graded_at DATETIME",
+		"ALTER TABLE submissions ADD COLUMN compile_output TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE verdicts ADD COLUMN group_num INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE verdicts ADD COLUMN points_fraction REAL NOT NULL DEFAULT 1.0",
 	)
@@ -229,18 +231,19 @@ func migratePostgres() error {
 			position     INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE TABLE IF NOT EXISTS submissions (
-			id           SERIAL PRIMARY KEY,
-			user_id      INTEGER NOT NULL REFERENCES users(id),
-			problem_id   INTEGER NOT NULL REFERENCES problems(id),
-			language     TEXT NOT NULL,
-			code         TEXT NOT NULL,
-			status       TEXT NOT NULL DEFAULT 'queued',
-			verdict      TEXT NOT NULL DEFAULT '',
-			score        INTEGER NOT NULL DEFAULT 0,
-			time_ms      INTEGER NOT NULL DEFAULT 0,
-			memory_kb    INTEGER NOT NULL DEFAULT 0,
-			submitted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			graded_at    TIMESTAMPTZ
+			id             SERIAL PRIMARY KEY,
+			user_id        INTEGER NOT NULL REFERENCES users(id),
+			problem_id     INTEGER NOT NULL REFERENCES problems(id),
+			language       TEXT NOT NULL,
+			code           TEXT NOT NULL,
+			status         TEXT NOT NULL DEFAULT 'queued',
+			verdict        TEXT NOT NULL DEFAULT '',
+			score          INTEGER NOT NULL DEFAULT 0,
+			time_ms        INTEGER NOT NULL DEFAULT 0,
+			memory_kb      INTEGER NOT NULL DEFAULT 0,
+			compile_output TEXT NOT NULL DEFAULT '',
+			submitted_at   TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			graded_at      TIMESTAMPTZ
 		)`,
 		`CREATE TABLE IF NOT EXISTS verdicts (
 			id              SERIAL PRIMARY KEY,
@@ -292,6 +295,7 @@ func migratePostgres() error {
 	}
 	runIgnored(
 		"ALTER TABLE submissions ADD COLUMN IF NOT EXISTS graded_at TIMESTAMPTZ",
+		"ALTER TABLE submissions ADD COLUMN IF NOT EXISTS compile_output TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE verdicts ADD COLUMN IF NOT EXISTS group_num INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE verdicts ADD COLUMN IF NOT EXISTS points_fraction REAL NOT NULL DEFAULT 1.0",
 	)

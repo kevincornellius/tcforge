@@ -154,6 +154,7 @@ export interface Problem {
   time_limit: number
   memory_limit: number
   position: number
+  has_scorer?: boolean
 }
 
 export interface Submission {
@@ -161,7 +162,8 @@ export interface Submission {
   problem_slug: string
   problem_title: string
   language: string
-  code?: string        // only returned by GET /submissions/:id
+  code?: string           // only returned by GET /submissions/:id
+  compile_output?: string // only returned by GET /submissions/:id, non-empty on CE
   status: string
   verdict: string
   score: number

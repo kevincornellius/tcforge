@@ -26,6 +26,7 @@ type Problem struct {
 	TimeLimit   int    `json:"time_limit"`
 	MemoryLimit int    `json:"memory_limit"`
 	Position    int    `json:"position"`
+	HasScorer   bool   `json:"has_scorer"`
 }
 
 type StatementMeta struct {
@@ -56,7 +57,7 @@ func langLabel(code string) string {
 
 func ListProblems(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.DB.Query(
-		"SELECT id, slug, title, time_limit, memory_limit, position FROM problems ORDER BY position",
+		"SELECT id, slug, path, title, time_limit, memory_limit, position FROM problems ORDER BY position",
 	)
 	if err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)
@@ -67,7 +68,10 @@ func ListProblems(w http.ResponseWriter, r *http.Request) {
 	problems := []Problem{}
 	for rows.Next() {
 		var p Problem
-		rows.Scan(&p.ID, &p.Slug, &p.Title, &p.TimeLimit, &p.MemoryLimit, &p.Position)
+		var path string
+		rows.Scan(&p.ID, &p.Slug, &path, &p.Title, &p.TimeLimit, &p.MemoryLimit, &p.Position)
+		_, err := os.Stat(filepath.Join(contestDir, path, "scorer"))
+		p.HasScorer = err == nil
 		problems = append(problems, p)
 	}
 	json.NewEncoder(w).Encode(problems)
@@ -93,6 +97,9 @@ func GetProblem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
+
+	_, err = os.Stat(filepath.Join(contestDir, path, "scorer"))
+	p.HasScorer = err == nil
 
 	availLangs := availableLanguages(p.ID, path)
 

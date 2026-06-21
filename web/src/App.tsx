@@ -76,10 +76,10 @@ function Nav({ contest }: { contest: ContestState | null }) {
   return (
     <div className={`nav-shell${isSlim ? " nav-shell-hidden" : ""}`}>
       <nav className={menuOpen ? "nav-mobile-open" : ""}>
-        <div className="nav-logo">
+        <NavLink to="/problems" className="nav-logo">
           <img src="/logo.svg" alt="tcforge" />
           <span className="nav-brand">{contest?.name || "tcforge"}</span>
-        </div>
+        </NavLink>
 
         <button
           className="nav-hamburger"
@@ -166,12 +166,21 @@ function AppRoutes() {
   const [contest, setContest] = useState<ContestState | null>(null)
   const { user } = useAuth()
 
+  // Fetch once on mount (public endpoint) so the login page can show the contest name.
+  useEffect(() => {
+    api.contest().then(setContest).catch(() => {})
+  }, [])
+
+  // Poll every 30s only when logged in (for live countdown / state updates).
   useEffect(() => {
     if (!user) return
-    api.contest().then(setContest).catch(() => {})
     const id = setInterval(() => api.contest().then(setContest).catch(() => {}), 30000)
     return () => clearInterval(id)
   }, [user])
+
+  useEffect(() => {
+    if (contest?.name) document.title = contest.name
+  }, [contest?.name])
 
   const gate = (el: JSX.Element) => (
     <RequireAuth><ContestGate contest={contest}>{el}</ContestGate></RequireAuth>
@@ -193,8 +202,8 @@ function AppRoutes() {
         </Routes>
       </main>
       <footer className="site-footer">
-        <span>{contest?.name || "tcforge"}</span>
-        <a href="https://github.com/kevincornellius/tcforge" target="_blank" rel="noopener noreferrer" className="site-footer-link">powered by TCForge</a>
+        <span>{contest?.name || ""}</span>
+        <span>forged with <a href="https://github.com/kevincornellius/tcforge" target="_blank" rel="noopener noreferrer" className="site-footer-link">tcforge</a></span>
       </footer>
     </ContestContext.Provider>
   )

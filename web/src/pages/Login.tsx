@@ -1,10 +1,12 @@
 import { useState, FormEvent } from "react"
 import { useNavigate } from "react-router-dom"
 import { useAuth } from "../auth"
+import { useContest } from "../App"
 
 export default function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const contest = useContest()
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [err, setErr] = useState("")
@@ -29,7 +31,7 @@ export default function Login() {
       <div className="login-card">
         <div className="login-logo-wrap">
           <img src="/logo_text.svg" alt="tcforge" />
-          <span className="login-sub">Contest Platform</span>
+          {contest?.name && <span className="login-sub">{contest.name}</span>}
         </div>
         <form className="login-form" onSubmit={onSubmit}>
           <input

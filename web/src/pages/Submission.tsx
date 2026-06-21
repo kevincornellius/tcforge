@@ -33,6 +33,17 @@ function VerdictBadge({ verdict, status, size }: { verdict: string; status?: str
   return <span className={`badge${size === "lg" ? " badge-lg" : ""} badge-${v}`}>{v || "—"}</span>
 }
 
+const ICON_COPY = (
+  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+  </svg>
+)
+const ICON_CHECK = (
+  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="20 6 9 17 4 12"/>
+  </svg>
+)
+
 function CopyButton({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false)
   function copy() {
@@ -41,7 +52,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
       setTimeout(() => setCopied(false), 2000)
     })
   }
-  return <button className={className ?? "copy-btn"} onClick={copy}>{copied ? "Copied!" : "Copy"}</button>
+  return <button className={className ?? "copy-btn"} onClick={copy} title={copied ? "Copied!" : "Copy"}>{copied ? ICON_CHECK : ICON_COPY}</button>
 }
 
 function SourceCode({ code, language }: { code: string; language: string }) {
@@ -51,7 +62,9 @@ function SourceCode({ code, language }: { code: string; language: string }) {
     : code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   return (
     <div className="src-wrap">
-      <CopyButton text={code} className="src-copy-btn" />
+      <div className="src-toolbar">
+        <CopyButton text={code} className="src-copy-btn" />
+      </div>
       <pre className="src-code"><code dangerouslySetInnerHTML={{ __html: highlighted }} /></pre>
     </div>
   )
@@ -207,6 +220,14 @@ export default function SubmissionPage() {
           </div>
         </div>
       </div>
+
+      {/* Compilation error output */}
+      {sub.verdict === "CE" && sub.compile_output && (
+        <div style={{ marginBottom: "var(--s5)" }}>
+          <p className="section-label">Compilation Error</p>
+          <pre className="ce-output">{sub.compile_output}</pre>
+        </div>
+      )}
 
       {/* Judging progress */}
       {pending && (

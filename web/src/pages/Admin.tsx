@@ -422,6 +422,7 @@ function ProblemEditor({ problem, open, onToggle, onSaved }: {
         <span className="ped-slug">{problem.slug}</span>
         <span className="ped-title">{problem.title}</span>
         <span className="ped-limits">{problem.time_limit}s / {problem.memory_limit}MB</span>
+        {problem.has_scorer && <span className="ped-scorer-badge">scorer</span>}
         <span className="ped-chevron">▼</span>
       </div>
 

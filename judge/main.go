@@ -24,6 +24,7 @@ import (
 )
 
 var judgeIsPostgres bool
+var isolateAvailable bool
 
 func rebind(q string) string {
 	if !judgeIsPostgres {
@@ -55,6 +56,14 @@ func main() {
 	contestDir := os.Getenv("TCFORGE_CONTEST_DIR")
 	if contestDir == "" {
 		contestDir = "/contest"
+	}
+
+	// Detect isolate sandbox.
+	if _, err := exec.LookPath("isolate"); err == nil {
+		isolateAvailable = true
+		dlog("sandbox: using isolate")
+	} else {
+		dlog("sandbox: isolate not found — falling back to ulimit (dev mode)")
 	}
 
 	var db *sql.DB
@@ -191,8 +200,24 @@ func processNext(db *sql.DB, contestDir string) (retErr error) {
 	dlog("judging submission %d (problem=%s lang=%s)", sub.ID, sub.ProblemPath, sub.Language)
 	db.Exec(rebind("UPDATE submissions SET status='judging' WHERE id=?"), sub.ID)
 
+	// Compile outside judge() so we can capture and store CE output.
+	tmpDir, err := os.MkdirTemp("", "tcforge-*")
+	if err != nil {
+		db.Exec(rebind("UPDATE submissions SET status='done', verdict='IE', graded_at=CURRENT_TIMESTAMP WHERE id=?"), sub.ID)
+		return fmt.Errorf("mktemp: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	binPath, ceOutput, compErr := compile(sub.Language, sub.Code, tmpDir)
+	if compErr != nil {
+		dlog("CE for submission %d: %v", sub.ID, compErr)
+		db.Exec(rebind("UPDATE submissions SET status='done', verdict='CE', compile_output=?, graded_at=CURRENT_TIMESTAMP WHERE id=?"),
+			ceOutput, sub.ID)
+		return nil
+	}
+
 	scoring := contestScoring(contestDir)
-	finalVerdict, score, maxTimeMs, maxMemKb, subtaskResults := judge(db, sub, contestDir, scoring)
+	finalVerdict, score, maxTimeMs, maxMemKb, subtaskResults := judge(db, sub, binPath, tmpDir, contestDir, scoring)
 
 	db.Exec(rebind("UPDATE submissions SET status='done', verdict=?, score=?, time_ms=?, memory_kb=?, graded_at=CURRENT_TIMESTAMP WHERE id=?"),
 		finalVerdict, score, maxTimeMs, maxMemKb, sub.ID)
@@ -346,7 +371,7 @@ func (s tcScore) effectivePts(subtaskMax float64) float64 {
 	}
 }
 
-func judge(db *sql.DB, sub submission, contestDir, scoring string) (
+func judge(db *sql.DB, sub submission, binPath, tmpDir, contestDir, scoring string) (
 	finalVerdict string, score, maxTimeMs, maxMemKb int, subtaskResults []subtaskScoreResult,
 ) {
 	problemDir := filepath.Join(contestDir, sub.ProblemPath)
@@ -362,18 +387,6 @@ func judge(db *sql.DB, sub submission, contestDir, scoring string) (
 		return "IE", 0, 0, 0, nil
 	}
 	sort.Strings(inFiles)
-
-	tmpDir, err := os.MkdirTemp("", "tcforge-*")
-	if err != nil {
-		return "IE", 0, 0, 0, nil
-	}
-	defer os.RemoveAll(tmpDir)
-
-	binPath, err := compile(sub.Language, sub.Code, tmpDir)
-	if err != nil {
-		dlog("CE: %v", err)
-		return "CE", 0, 0, 0, nil
-	}
 
 	// groupScores[groupNum] = per-TC scores in the order they were run.
 	groupScores := map[int][]tcScore{}
@@ -455,8 +468,7 @@ func judge(db *sql.DB, sub submission, contestDir, scoring string) (
 		return "AC", 100, maxTimeMs, maxMemKb, nil
 	}
 
-	// IOI scoring — scoring functions return 0 for time (blank named return), so preserve
-	// maxTimeMs and maxMemKb from the loop above rather than overwriting them.
+	// IOI scoring — preserve maxTimeMs and maxMemKb from the loop above.
 	cfg := loadProblemConfig(problemDir)
 	var fv string
 	var sc int
@@ -632,35 +644,252 @@ func sumGroupScore(tcs []tcScore, groupMax float64) float64 {
 	return total
 }
 
-func compile(lang, code, dir string) (string, error) {
+const maxCEOutput = 64 * 1024 // 64 KB cap on stored compiler output
+
+func truncateCE(s string) string {
+	if len(s) <= maxCEOutput {
+		return s
+	}
+	return s[:maxCEOutput] + "\n... (truncated)"
+}
+
+func compile(lang, code, dir string) (binPath, ceOutput string, err error) {
 	switch lang {
 	case "cpp17", "cpp20":
 		src := filepath.Join(dir, "solution.cpp")
 		bin := filepath.Join(dir, "solution")
-		if err := os.WriteFile(src, []byte(code), 0644); err != nil {
-			return "", err
+		if werr := os.WriteFile(src, []byte(code), 0644); werr != nil {
+			return "", "", werr
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		out, err := exec.CommandContext(ctx, "g++", "-O2", "-std=c++20", "-o", bin, src).CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("%s", out)
+		out, cerr := exec.CommandContext(ctx, "g++", "-O2", "-std=c++20", "-o", bin, src).CombinedOutput()
+		if cerr != nil {
+			return "", truncateCE(string(out)), fmt.Errorf("compile error")
 		}
-		return bin, nil
+		return bin, "", nil
 
 	case "python3":
 		src := filepath.Join(dir, "solution.py")
-		if err := os.WriteFile(src, []byte(code), 0644); err != nil {
-			return "", err
+		if werr := os.WriteFile(src, []byte(code), 0644); werr != nil {
+			return "", "", werr
 		}
-		return src, nil
+		// Syntax check — surfaces SyntaxErrors as CE rather than RTE.
+		out, cerr := exec.Command("python3", "-m", "py_compile", src).CombinedOutput()
+		if cerr != nil {
+			return "", truncateCE(string(out)), fmt.Errorf("syntax error")
+		}
+		return src, "", nil
 
 	default:
-		return "", fmt.Errorf("unsupported language: %s", lang)
+		return "", "", fmt.Errorf("unsupported language: %s", lang)
 	}
 }
 
+// copyFile copies src to dst with executable permission.
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0755)
+}
+
+// parseMeta reads an isolate meta file (key:value per line) into a map.
+func parseMeta(path string) map[string]string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return map[string]string{}
+	}
+	m := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
+		}
+		idx := strings.IndexByte(line, ':')
+		if idx < 0 {
+			continue
+		}
+		m[line[:idx]] = line[idx+1:]
+	}
+	return m
+}
+
+// runWithIsolate runs one test case inside the isolate sandbox.
+//
+// Security properties provided by isolate (requires privileged container):
+//   - Network namespace isolation (no outbound connections)
+//   - Filesystem chroot (only /box + read-only system dirs)
+//   - cgroup memory tracking and hard memory limit
+//   - CPU + wall-time limits enforced by isolate
+//
+// Hang prevention: we also wrap the isolate process itself in a hard Go-level
+// deadline with process-group kill, so a stalled isolate never blocks the judge.
+func runWithIsolate(lang, binPath, inFile, outFile, scorerPath, workDir string, timeLimitSec, memLimitMB int) (ts tcScore, timeMs, memKb int) {
+	const boxID = 0
+	metaPath := filepath.Join(workDir, "isolate.meta")
+	boxDir := fmt.Sprintf("/var/local/lib/isolate/%d/box", boxID)
+
+	// Cleanup any dirty box from a previous run, then init fresh.
+	exec.Command("isolate", "--cg", fmt.Sprintf("--box-id=%d", boxID), "--cleanup").Run()
+	if out, err := exec.Command("isolate", "--cg", fmt.Sprintf("--box-id=%d", boxID), "--init").CombinedOutput(); err != nil {
+		dlog("isolate --init failed: %v: %s", err, strings.TrimSpace(string(out)))
+		return tcScore{verdict: "IE"}, 0, 0
+	}
+	defer exec.Command("isolate", "--cg", fmt.Sprintf("--box-id=%d", boxID), "--cleanup").Run()
+
+	// Copy solution into the box.
+	var runCmd []string
+	switch lang {
+	case "cpp17", "cpp20":
+		if err := copyFile(binPath, filepath.Join(boxDir, "solution")); err != nil {
+			dlog("copy binary: %v", err)
+			return tcScore{verdict: "IE"}, 0, 0
+		}
+		runCmd = []string{"/box/solution"}
+	case "python3":
+		if err := copyFile(binPath, filepath.Join(boxDir, "solution.py")); err != nil {
+			return tcScore{verdict: "IE"}, 0, 0
+		}
+		runCmd = []string{"python3", "/box/solution.py"}
+	default:
+		return tcScore{verdict: "IE"}, 0, 0
+	}
+
+	input, err := os.ReadFile(inFile)
+	if err != nil {
+		return tcScore{verdict: "IE"}, 0, 0
+	}
+
+	wallSec := timeLimitSec + 2
+	memKB := memLimitMB * 1024
+
+	args := []string{
+		"--cg",
+		fmt.Sprintf("--box-id=%d", boxID),
+		fmt.Sprintf("--time=%.1f", float64(timeLimitSec)),
+		fmt.Sprintf("--wall-time=%d", wallSec),
+		fmt.Sprintf("--mem=%d", memKB),
+		"-p64",         // allow multiple processes (Python's import mechanism needs them)
+		"--dir=/usr:ro",
+		"--dir=/lib:ro",
+		"--dir=/lib64:ro",
+		"--dir=/etc:ro",
+		fmt.Sprintf("--meta=%s", metaPath),
+		"--run", "--",
+	}
+	args = append(args, runCmd...)
+
+	var outBuf bytes.Buffer
+	lw := &limitWriter{w: &outBuf, rem: 64 * 1024 * 1024}
+
+	cmd := exec.Command("isolate", args...)
+	// Setpgid ensures we can kill the entire isolate process group on hard timeout.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Stdin = bytes.NewReader(input)
+	cmd.Stdout = lw
+	// cmd.Stderr is nil: isolate's own diagnostic output is discarded.
+
+	start := time.Now()
+	if err := cmd.Start(); err != nil {
+		dlog("isolate start: %v", err)
+		return tcScore{verdict: "IE"}, 0, 0
+	}
+
+	// Hard deadline: isolate's wall-time + 5s grace.
+	// This catches the case where isolate itself hangs (cgroup cleanup race, etc.)
+	// and prevents the judge from blocking indefinitely.
+	hardDeadline := time.Duration(wallSec)*time.Second + 5*time.Second
+	timer := time.NewTimer(hardDeadline)
+	defer timer.Stop()
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	select {
+	case <-done:
+		// isolate exited normally (or with a verdict-related non-zero exit).
+	case <-timer.C:
+		// Hard timeout fired — kill isolate and all its children via pgid.
+		dlog("isolate hard timeout for submission (wall=%ds + 5s) — killing pgid", wallSec)
+		if cmd.Process != nil {
+			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			cmd.Process.Kill()
+		}
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			dlog("warning: isolate did not exit after SIGKILL")
+		}
+		return tcScore{verdict: "TLE"}, int(time.Since(start).Milliseconds()), 0
+	}
+
+	elapsed := int(time.Since(start).Milliseconds())
+	meta := parseMeta(metaPath)
+
+	// Prefer isolate's measured CPU time over wall clock.
+	if t, ok := meta["time"]; ok {
+		if tf, err := strconv.ParseFloat(t, 64); err == nil {
+			elapsed = int(tf * 1000)
+		}
+	}
+	// Memory from cgroup (KB).
+	if m, ok := meta["cg-mem"]; ok {
+		if mi, err := strconv.Atoi(m); err == nil {
+			memKb = mi
+		}
+	}
+
+	status := meta["status"]
+	switch status {
+	case "TO":
+		return tcScore{verdict: "TLE"}, elapsed, memKb
+	case "RE", "SG":
+		if meta["cg-oom-killed"] == "1" || memKb > memKB {
+			return tcScore{verdict: "MLE"}, elapsed, memKb
+		}
+		return tcScore{verdict: "RTE"}, elapsed, memKb
+	case "XX":
+		dlog("isolate internal error: meta=%v", meta)
+		return tcScore{verdict: "IE"}, elapsed, memKb
+	}
+
+	// Status absent → process exited with code 0 within limits.
+	if scorerPath == "" {
+		expected, err := os.ReadFile(outFile)
+		if err != nil {
+			return tcScore{verdict: "IE"}, elapsed, memKb
+		}
+		if normalize(outBuf.String()) == normalize(string(expected)) {
+			return tcScore{verdict: "AC"}, elapsed, memKb
+		}
+		return tcScore{verdict: "WA"}, elapsed, memKb
+	}
+
+	// Custom scorer: write contestant output to temp file, invoke scorer.
+	contestantOut := filepath.Join(workDir, "contestant.out")
+	if err := os.WriteFile(contestantOut, outBuf.Bytes(), 0644); err != nil {
+		return tcScore{verdict: "IE"}, elapsed, memKb
+	}
+	scorerCtx, scorerCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer scorerCancel()
+	var scorerStdout bytes.Buffer
+	scorerCmd := exec.CommandContext(scorerCtx, scorerPath, inFile, outFile, contestantOut)
+	scorerCmd.Stdout = &scorerStdout
+	scorerCmd.Run()
+	return parseCheckerVerdict(scorerStdout.String()), elapsed, memKb
+}
+
 func runCase(lang, binPath, inFile, outFile, scorerPath, workDir string, timeLimitSec, memLimitMB int) (ts tcScore, timeMs, memKb int) {
+	if isolateAvailable {
+		return runWithIsolate(lang, binPath, inFile, outFile, scorerPath, workDir, timeLimitSec, memLimitMB)
+	}
+	return runCaseUlimit(lang, binPath, inFile, outFile, scorerPath, workDir, timeLimitSec, memLimitMB)
+}
+
+// runCaseUlimit is the fallback sandbox used when isolate is not available (local dev on macOS).
+// It uses ulimit + process-group kill — no network or filesystem isolation.
+func runCaseUlimit(lang, binPath, inFile, outFile, scorerPath, workDir string, timeLimitSec, memLimitMB int) (ts tcScore, timeMs, memKb int) {
 	input, err := os.ReadFile(inFile)
 	if err != nil {
 		return tcScore{verdict: "IE"}, 0, 0
@@ -799,6 +1028,8 @@ func runCase(lang, binPath, inFile, outFile, scorerPath, workDir string, timeLim
 //	./communicator <input> < pipe | ./solution > pipe
 //
 // The communicator writes its verdict to stderr (tcframe two-line format).
+// Note: interactive mode uses the ulimit sandbox regardless of isolate availability,
+// as the communicator runs as a trusted process outside the box.
 func runCaseInteractive(lang, binPath, inFile, communicatorPath, workDir string, timeLimitSec, memLimitMB int) (ts tcScore, timeMs, memKb int) {
 	pipePath := filepath.Join(workDir, "comm.pipe")
 	commErrPath := filepath.Join(workDir, "comm.stderr")

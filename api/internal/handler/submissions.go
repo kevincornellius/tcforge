@@ -6,10 +6,32 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/kevincornellius/tcforge/api/internal/db"
 )
+
+// Per-user submission rate limit: one submission per 15 seconds.
+// Admins are exempt. State is in-memory; resets on API restart.
+const submitCooldown = 15 * time.Second
+const maxCodeBytes = 256 * 1024 // 256 KB
+
+var (
+	rlMu     sync.Mutex
+	rlLastAt = map[int]time.Time{}
+)
+
+func submitRateLimit(userID int) bool {
+	rlMu.Lock()
+	defer rlMu.Unlock()
+	if t, ok := rlLastAt[userID]; ok && time.Since(t) < submitCooldown {
+		return false
+	}
+	rlLastAt[userID] = time.Now()
+	return true
+}
 
 type submitRequest struct {
 	ProblemSlug string `json:"problem_slug"`
@@ -28,11 +50,20 @@ func Submit(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "submissions are currently disabled", http.StatusForbidden)
 			return
 		}
+		if !submitRateLimit(user.ID) {
+			http.Error(w, "please wait before submitting again", http.StatusTooManyRequests)
+			return
+		}
 	}
 
 	var req submitRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Code) > maxCodeBytes {
+		http.Error(w, "code exceeds 256 KB limit", http.StatusBadRequest)
 		return
 	}
 
@@ -98,24 +129,25 @@ func GetSubmission(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
 
 	var sub struct {
-		ID           int     `json:"id"`
-		ProblemSlug  string  `json:"problem_slug"`
-		ProblemTitle string  `json:"problem_title"`
-		Language     string  `json:"language"`
-		Code         string  `json:"code"`
-		Status       string  `json:"status"`
-		Verdict      string  `json:"verdict"`
-		Score        int     `json:"score"`
-		TimeMs       int     `json:"time_ms"`
-		MemoryKb     int     `json:"memory_kb"`
-		SubmittedAt  string  `json:"submitted_at"`
-		GradedAt     *string `json:"graded_at"`
+		ID            int     `json:"id"`
+		ProblemSlug   string  `json:"problem_slug"`
+		ProblemTitle  string  `json:"problem_title"`
+		Language      string  `json:"language"`
+		Code          string  `json:"code"`
+		Status        string  `json:"status"`
+		Verdict       string  `json:"verdict"`
+		Score         int     `json:"score"`
+		TimeMs        int     `json:"time_ms"`
+		MemoryKb      int     `json:"memory_kb"`
+		CompileOutput string  `json:"compile_output"`
+		SubmittedAt   string  `json:"submitted_at"`
+		GradedAt      *string `json:"graded_at"`
 	}
 	err := db.DB.QueryRow(`
-		SELECT s.id, p.slug, p.title, s.language, s.code, s.status, s.verdict, s.score, s.time_ms, s.memory_kb, s.submitted_at, s.graded_at
+		SELECT s.id, p.slug, p.title, s.language, s.code, s.status, s.verdict, s.score, s.time_ms, s.memory_kb, s.compile_output, s.submitted_at, s.graded_at
 		FROM submissions s JOIN problems p ON s.problem_id = p.id
 		WHERE s.id = ?`, id,
-	).Scan(&sub.ID, &sub.ProblemSlug, &sub.ProblemTitle, &sub.Language, &sub.Code, &sub.Status, &sub.Verdict, &sub.Score, &sub.TimeMs, &sub.MemoryKb, &sub.SubmittedAt, &sub.GradedAt)
+	).Scan(&sub.ID, &sub.ProblemSlug, &sub.ProblemTitle, &sub.Language, &sub.Code, &sub.Status, &sub.Verdict, &sub.Score, &sub.TimeMs, &sub.MemoryKb, &sub.CompileOutput, &sub.SubmittedAt, &sub.GradedAt)
 	if err == sql.ErrNoRows {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
